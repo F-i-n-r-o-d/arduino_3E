@@ -1,0 +1,1 @@
+Měření rozsahu rotace - S každým stupněm otočení se postupně rozsvěcují další diody.Cílem je dosáhnout rozsvícení všech diod, což motivuje pacienta k maximálnímu pohybu.
