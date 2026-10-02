@@ -1,0 +1,1 @@
+Rozpoznávání jednotlivých veslařských záběrů, jejich počítání a měření tempa s následným zobrazením výsledků pomocí světelné tyče.
