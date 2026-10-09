@@ -1,0 +1,44 @@
+ 	
+Komunikace jednočipových mikropočítačů
+Úvod do předmětu
+
+ 
+	
+Metody komunikace
+Bluetooth
+WiFi
+Bezdrátový přenos dat v bezlicenčních pásmech
+
+ 
+	
+Komunikační protokoly
+http 
+MQTT
+ZigBee
+
+ 
+	
+Preprocessing dat
+Příprava dat do formátu JSON
+
+ 
+	
+Odesílání dat
+Knihovny pro komunikaci
+
+ 
+	
+Zpracování dat
+Web API
+MQTT Broker
+
+ 
+	
+Vizualizace dat
+Webová stránka
+Využití hotových mobilních řešení
+
+17.
+	
+Správa nastavení aplikace
+Arduino OTA
