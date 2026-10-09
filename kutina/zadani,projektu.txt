@@ -1,0 +1,29 @@
+Rehabilitační pomůcka je tyč s LED pásem na jedné ze 4 stran a senzory natočení. Osy X a Y měří naklánění, osa Z otáčení tyče kolem její osy. Současný program funguje takto: naklánění pohybuje červenou diodou po pásu, na náhodném místě se objeví žlutý pás (např. 10 diod) a hráč musí červenou diodu v pásu udržet po stanovenou dobu. Po splnění se pás přesune na nové náhodné místo.
+
+Cíl
+
+Rozšířit program tak, aby proti sobě mohli hrát dva hráči, každý se svou tyčí, propojení přes server. Vyhrává ten, kdo první splní 10 úkolů.
+
+Požadavky
+
+Propojení přes server
+
+Obě tyče se připojí ke společnému serveru (technologie je na řešiteli, např. WebSocket nebo MQTT).
+Každá tyč průběžně posílá pozici své diody a server ji předává druhé tyči.
+Program zvládne výpadek spojení.
+
+Zobrazení soupeře
+
+Na každé tyči je kromě vlastní červené diody vidět i dioda soupeře v jiné barvě (např. modrá), která se pohybuje podle jeho naklánění.
+Žlutý pás je u každého hráče vlastní a soupeř ho nevidí.
+
+Zobrazení skóre otočením tyče (osa Z)
+
+Pokud je tyč otočena a drží se tak 3 sekundy, přepne se do režimu skóre.
+Místo diod a žlutého pásu se rozsvítí počet diod odpovídající počtu splněných úkolů.
+Po otočení zpět se obnoví běžná hra. Soupeř mezitím hraje dál.
+
+Konec hry
+
+Při dosažení 10 bodů se tyč vítěze celá rozbliká zeleně a tyč poraženého červeně.
+Poté lze spustit novou hru.
