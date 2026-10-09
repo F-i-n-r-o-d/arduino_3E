@@ -1,0 +1,3 @@
+Vizualizace dat - webová stránka
+Web API
+příprava do formátu json
