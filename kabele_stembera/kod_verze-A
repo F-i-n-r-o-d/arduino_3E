@@ -1,0 +1,161 @@
+
+
+#include <Wire.h>
+
+#include <Adafruit_MPU6050.h>
+
+#include <Adafruit_Sensor.h>
+
+#include <FastLED.h>
+ 
+#define LED_PIN 6
+
+#define NUM_LEDS 30
+
+#define BRIGHTNESS 60
+ 
+// Nastaveni detekce zaběru
+
+#define THRESHOLD 3.0
+
+#define MIN_INTERVAL 700
+ 
+Adafruit_MPU6050 mpu;
+
+CRGB leds[NUM_LEDS];
+ 
+unsigned long lastStroke = 0;
+
+unsigned long lastPrint = 0;
+
+int strokeCount = 0;
+
+float tempo = 0;
+ 
+void setup() {
+
+  Serial.begin(115200);
+ 
+  FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
+
+  FastLED.setBrightness(BRIGHTNESS);
+
+  FastLED.clear(true);
+ 
+  if (!mpu.begin()) {
+
+    Serial.println("Chyba: Senzor MPU6050 nenalezen!");
+
+    while (1) {
+
+      delay(10);
+
+    }
+
+  }
+ 
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+
+  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+ 
+  Serial.println("System pripraven.");
+
+  Serial.println("Zacni veslovat!");
+
+}
+ 
+void loop() {
+
+  sensors_event_t a, g, temp;
+
+  mpu.getEvent(&a, &g, &temp);
+ 
+  // Velikost zrychleni ve trech osach
+
+  float acceleration = sqrt(
+
+    a.acceleration.x * a.acceleration.x +
+
+    a.acceleration.y * a.acceleration.y +
+
+    a.acceleration.z * a.acceleration.z
+
+  );
+ 
+  unsigned long now = millis();
+ 
+  // Odecteni gravitace a detekce pohybu
+
+  float movement = abs(acceleration - 9.81);
+ 
+  if (movement > THRESHOLD &&
+
+      now - lastStroke >= MIN_INTERVAL) {
+ 
+    if (lastStroke > 0) {
+
+      unsigned long interval = now - lastStroke;
+
+      tempo = 60000.0 / interval;
+
+    }
+ 
+    lastStroke = now;
+
+    strokeCount++;
+ 
+    Serial.print("Zaber: ");
+
+    Serial.print(strokeCount);
+
+    Serial.print(" | Tempo: ");
+
+    Serial.print(tempo);
+
+    Serial.println(" zaberu/min");
+ 
+    updateLights();
+
+  }
+ 
+  // Pri zastaveni postupne vynuluj zobrazene tempo
+
+  if (lastStroke > 0 && now - lastStroke > 3000) {
+
+    tempo = 0;
+
+    FastLED.clear();
+
+    FastLED.show();
+
+  }
+ 
+  delay(10);
+
+}
+ 
+void updateLights() {
+
+  CRGB color;
+ 
+  if (tempo < 20) {
+
+    color = CRGB::Blue;
+
+  } else if (tempo <= 30) {
+
+    color = CRGB::Green;
+
+  } else {
+
+    color = CRGB::Red;
+
+  }
+ 
+  fill_solid(leds, NUM_LEDS, color);
+
+  FastLED.show();
+
+}
+
+ 
