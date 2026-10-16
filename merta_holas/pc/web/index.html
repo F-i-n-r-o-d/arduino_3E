@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rehabilitační tyč</title>
+<style>
+  body { font-family: Segoe UI, sans-serif; background: #181818; color: #eee; margin: 0; padding: 20px; }
+  h1 { margin-top: 0; }
+  .karta { background: #21262d; border: 1px solid #30363d; border-radius: 10px; padding: 15px 20px; margin-bottom: 15px; }
+  .radek { display: flex; gap: 15px; flex-wrap: wrap; }
+  .radek > .karta { flex: 1; min-width: 280px; }
+  button { background: #238636; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; margin: 2px; }
+  button.stop { background: #da3633; }
+  button.sede { background: #30363d; }
+  input { background: #0d1117; color: #eee; border: 1px solid #30363d; border-radius: 6px; padding: 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid #30363d; padding: 4px 8px; text-align: left; }
+  .online { color: #3fb950; } .offline { color: #f85149; }
+  canvas { width: 100%; height: 250px; background: #0d1117; border-radius: 8px; }
+  .legenda span { margin-right: 15px; }
+</style>
+</head>
+<body>
+<h1>Rehabilitační LED tyč</h1>
+
+<div class="radek">
+  <div class="karta">
+    <h3>Tyče</h3>
+    <table id="tyce"><tr><td>Žádná tyč není připojená</td></tr></table>
+    <button class="sede" onclick="api('/api/prohodit')">Prohodit role</button>
+  </div>
+
+  <div class="karta">
+    <h3>Sezení</h3>
+    <p>Pacient: <input id="pacient"> Cvik: <input id="cvik"></p>
+    <button class="sede" onclick="nastavSezeni()">Nastavit</button>
+    <p>Opakování: <b id="opakovani">0</b> &nbsp; Vzor: <b id="maVzor">ne</b></p>
+  </div>
+
+  <div class="karta">
+    <h3>Ovládání</h3>
+    <p>Mentor:
+      <button onclick="api('/api/start', {role: 'mentor'})">Start</button>
+      <button class="stop" onclick="api('/api/stop', {role: 'mentor'})">Stop</button></p>
+    <p>Pacient:
+      <button onclick="api('/api/start', {role: 'pacient'})">Start</button>
+      <button class="stop" onclick="api('/api/stop', {role: 'pacient'})">Stop</button></p>
+  </div>
+</div>
+
+<div class="karta">
+  <h3>Poslední porovnání</h3>
+  <div class="legenda"><span style="color:#58a6ff">■ vzor (mentor)</span><span style="color:#f0883e">■ pokus (pacient)</span></div>
+  <canvas id="graf"></canvas>
+  <p id="vysledek">Zatím nic.</p>
+</div>
+
+<div class="karta">
+  <h3>Historie</h3>
+  <table id="historie"></table>
+</div>
+
+<script>
+async function api(cesta, data = {}) {
+  const r = await fetch(cesta, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+  const odpoved = await r.json();
+  if (!odpoved.ok) alert(odpoved.info);
+  obnov();
+}
+
+function nastavSezeni() {
+  api('/api/sezeni', { pacient: pacient.value, cvik: cvik.value });
+  nactiHistorii();
+}
+
+function vykresli(vzor, pokus) {
+  const c = document.getElementById('graf');
+  c.width = c.clientWidth; c.height = c.clientHeight;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+  const vse = [...(vzor || []), ...(pokus || [])];
+  if (!vse.length) return;
+  const maxT = Math.max(...vse.map(v => v.t)) || 1;
+  const maxU = Math.max(...vse.map(v => Math.abs(v.uhel)), 10);
+  const x = t => t / maxT * (c.width - 20) + 10;
+  const y = u => c.height / 2 - u / maxU * (c.height / 2 - 10);
+
+  g.strokeStyle = '#30363d'; g.beginPath(); g.moveTo(0, y(0)); g.lineTo(c.width, y(0)); g.stroke();
+  for (const [data, barva] of [[vzor, '#58a6ff'], [pokus, '#f0883e']]) {
+    if (!data) continue;
+    g.strokeStyle = barva; g.lineWidth = 2; g.beginPath();
+    data.forEach((v, i) => i ? g.lineTo(x(v.t), y(v.uhel)) : g.moveTo(x(v.t), y(v.uhel)));
+    g.stroke();
+  }
+}
+
+function popisVysledku(v) {
+  const r = v.vysledek;
+  return `${v.pacient} – ${v.cvik}, opakování ${v.opakovani}: ` +
+    `rozsah ${r.rozsah.pokus.rozsah.toFixed(1)}° z ${r.rozsah.vzor.rozsah.toFixed(1)}° (${r.rozsah.procent ?? '–'} %), ` +
+    `tempo ${r.tempo.doba_pokus_s.toFixed(1)} s vs ${r.tempo.doba_vzor_s.toFixed(1)} s`;
+}
+
+let posledniVykresleny = null;
+
+async function obnov() {
+  const s = await (await fetch('/api/stav')).json();
+
+  document.getElementById('tyce').innerHTML = s.tyce.length
+    ? '<tr><th>ID</th><th>Role</th><th>Stav</th><th></th></tr>' + s.tyce.map(t =>
+        `<tr><td>${t.id}</td><td>${t.role}</td><td>${t.stav}</td>` +
+        `<td class="${t.online ? 'online' : 'offline'}">${t.online ? 'online' : 'offline'}</td></tr>`).join('')
+    : '<tr><td>Žádná tyč není připojená</td></tr>';
+
+  document.getElementById('opakovani').textContent = s.sezeni.opakovani;
+  document.getElementById('maVzor').textContent = s.vzor ? 'ano (' + s.vzor.cas + ')' : 'ne';
+  if (document.activeElement.tagName !== 'INPUT') {
+    pacient.value = s.sezeni.pacient; cvik.value = s.sezeni.cvik;
+  }
+
+  const v = s.posledni_vysledek;
+  const klic = v ? v.datum + v.opakovani : (s.vzor && s.vzor.cas);
+  if (klic !== posledniVykresleny) {
+    posledniVykresleny = klic;
+    vykresli(v ? v.vzor : s.vzor && s.vzor.vzorky, v && v.pokus);
+    document.getElementById('vysledek').textContent = v ? popisVysledku(v) : 'Zatím nic.';
+    nactiHistorii();
+  }
+}
+
+async function nactiHistorii() {
+  const h = await (await fetch('/api/historie')).json();
+  // TODO: grafy vývoje rozsahu / plynulosti v čase pro jednoho pacienta
+  document.getElementById('historie').innerHTML =
+    '<tr><th>Datum</th><th>Pacient</th><th>Cvik</th><th>Opak.</th><th>Rozsah %</th><th>Tempo (poměr)</th></tr>' +
+    h.slice().reverse().map(z =>
+      `<tr><td>${z.datum}</td><td>${z.pacient}</td><td>${z.cvik}</td><td>${z.opakovani}</td>` +
+      `<td>${z.vysledek.rozsah.procent ?? '–'}</td><td>${z.vysledek.tempo.pomer ?? '–'}</td></tr>`).join('');
+}
+
+obnov();
+nactiHistorii();
+setInterval(obnov, 1000);
+</script>
+</body>
+</html>

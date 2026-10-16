@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtuální tyč</title>
+<style>
+  body { font-family: Segoe UI, sans-serif; background: #181818; color: #eee; margin: 0; padding: 20px; }
+  h1 { margin: 0 0 10px; }
+  .obal { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  canvas { background: #0d1117; border-radius: 10px; border: 1px solid #30363d; touch-action: none; cursor: grab; max-width: 100%; }
+  .karta { background: #21262d; border: 1px solid #30363d; border-radius: 10px; padding: 15px 20px; min-width: 260px; }
+  td { padding: 3px 10px 3px 0; }
+  b { color: #58a6ff; }
+  .napoveda { color: #8b949e; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>Virtuální tyč <span id="nadpisId"></span></h1>
+<div class="obal">
+  <canvas id="platno" width="640" height="400"></canvas>
+  <div class="karta">
+    <table>
+      <tr><td>ID</td><td><b id="id"></b></td></tr>
+      <tr><td>Role</td><td><b id="role"></b></td></tr>
+      <tr><td>Stav</td><td><b id="stav"></b></td></tr>
+      <tr><td>Server</td><td><b id="server"></b></td></tr>
+      <tr><td>Náklon</td><td><b id="uhel"></b></td></tr>
+      <tr><td>Vzorků</td><td><b id="pocet"></b></td></tr>
+      <tr><td>Odpověď</td><td><b id="info">–</b></td></tr>
+    </table>
+    <p class="napoveda">
+      Tyč leží vodorovně na rukách. Nakloníš ji<br>
+      tažením za konec myší (nebo šipkami ← →).<br>
+      Kulička jde jako bublinka ve vodováze<br>
+      k vyššímu konci.<br>
+      Záznam se spouští z hlavní stránky<br>
+      <a href="#" id="odkaz" style="color:#58a6ff"></a>.
+    </p>
+    <p class="napoveda">
+      Barvy jako na skutečné tyči:<br>
+      modrá dioda = čeká na start<br>
+      červená kulička = záznam<br>
+      žlutá = odesílá, zelená = hotovo<br>
+      tlumeně červená = server nedostupný
+    </p>
+  </div>
+</div>
+
+<script>
+// Stejné konstanty a logika jako v tyc/tyc.ino
+// adresu serveru jde změnit v URL, např. http://localhost:8001/?server=http://192.168.1.100:8000
+const SERVER = new URLSearchParams(location.search).get('server') || `http://${location.hostname}:8000`;
+const ID = 'tyc-web-' + (location.port || '80');
+const POCET_LED = 64, SIRKA_KULICKY = 5, MAX_UHEL = 60;
+const PERIODA_VZORKU_MS = 50, PERIODA_DOTAZU_MS = 500, MAX_VZORKU = 1200;
+
+let stav = 'CEKANI', role = '?', uhel = 0, online = false;
+let vzorky = [], startZaznamu = 0, hotovoOd = 0;
+
+async function pozadavek(metoda, cesta, data) {
+  try {
+    const r = await fetch(SERVER + cesta, {
+      method: metoda,
+      headers: data ? { 'Content-Type': 'application/json' } : {},
+      body: data ? JSON.stringify(data) : undefined,
+    });
+    online = true;
+    return await r.json();
+  } catch (e) {
+    online = false;
+    return null;
+  }
+}
+
+async function registrace() {
+  const o = await pozadavek('POST', '/api/registrace', { id: ID });
+  if (o) role = o.role;
+}
+
+async function dotazNaPrikaz() {
+  const o = await pozadavek('GET', `/api/prikaz?id=${ID}`);
+  if (!o) return 'nic';
+  role = o.role;
+  return o.prikaz;
+}
+
+async function odesliZaznam() {
+  const o = await pozadavek('POST', '/api/data', { id: ID, role, vzorky });
+  document.getElementById('info').textContent = o ? o.info : 'chyba spojení';
+}
+
+// Dotazy na PC každých 500 ms — jako loop() v tyc.ino
+async function smyckaDotazu() {
+  if (stav === 'CEKANI') {
+    if (role === '?') await registrace();
+    if (await dotazNaPrikaz() === 'start') {
+      vzorky = [];
+      startZaznamu = performance.now();
+      stav = 'ZAZNAM';
+    }
+  } else if (stav === 'ZAZNAM') {
+    if (await dotazNaPrikaz() === 'stop' || vzorky.length >= MAX_VZORKU) {
+      stav = 'ODESILANI';
+      await odesliZaznam();
+      hotovoOd = performance.now();
+      stav = 'HOTOVO';
+    }
+  }
+  setTimeout(smyckaDotazu, PERIODA_DOTAZU_MS);
+}
+
+// Vzorkování 20 Hz
+setInterval(() => {
+  if (stav === 'ZAZNAM' && vzorky.length < MAX_VZORKU) {
+    vzorky.push({ t: Math.round(performance.now() - startZaznamu), uhel: Math.round(uhel * 10) / 10 });
+  }
+  if (stav === 'HOTOVO' && performance.now() - hotovoOd > 2000) stav = 'CEKANI';
+}, PERIODA_VZORKU_MS);
+
+// Co by svítilo na pásku — [r, g, b] pro každou diodu, hodnoty jako v tyc.ino
+function barvyLed() {
+  const vypl = c => Array(POCET_LED).fill(c);
+  if (!online) return vypl([20, 0, 0]);
+  if (stav === 'CEKANI') {
+    const led = vypl([0, 0, 0]);
+    led[role === 'pacient' ? POCET_LED - 1 : 0] = [0, 0, 60];
+    return led;
+  }
+  if (stav === 'ZAZNAM') {
+    let stred = Math.round((uhel + MAX_UHEL) / (2 * MAX_UHEL) * (POCET_LED - 1));
+    stred = Math.max(0, Math.min(POCET_LED - 1, stred));
+    return vypl([0, 0, 0]).map((c, i) => Math.abs(i - stred) <= Math.floor(SIRKA_KULICKY / 2) ? [120, 0, 0] : c);
+  }
+  if (stav === 'ODESILANI') return vypl([30, 30, 0]);
+  return vypl([0, 40, 0]); // HOTOVO
+}
+
+// ---------- kreslení ----------
+// Tyč leží vodorovně na obou rukách a naklání se kolem středu.
+// Kladný úhel = pravý konec (dioda 63) je výš. Kulička funguje jako bublinka
+// ve vodováze — jde k vyššímu konci.
+const platno = document.getElementById('platno');
+const g = platno.getContext('2d');
+const STRED = { x: 320, y: 200 }, DELKA = 560;
+
+function kresli() {
+  g.clearRect(0, 0, platno.width, platno.height);
+
+  // vyznačená vodorovná poloha a rozsah ±MAX_UHEL
+  g.strokeStyle = '#30363d'; g.lineWidth = 1; g.setLineDash([4, 6]);
+  for (const u of [-MAX_UHEL, 0, MAX_UHEL]) {
+    const r = u * Math.PI / 180, dx = Math.cos(r) * DELKA / 2, dy = Math.sin(r) * DELKA / 2;
+    g.beginPath(); g.moveTo(STRED.x - dx, STRED.y - dy); g.lineTo(STRED.x + dx, STRED.y + dy); g.stroke();
+  }
+  g.setLineDash([]);
+
+  g.save();
+  g.translate(STRED.x, STRED.y);
+  g.rotate(-uhel * Math.PI / 180); // na plátně kladná rotace = po směru hodinek
+
+  // ruce pod konci tyče
+  g.fillStyle = '#8b6f5a';
+  for (const x of [-DELKA / 2 + 50, DELKA / 2 - 50]) {
+    g.beginPath(); g.roundRect(x - 22, 12, 44, 26, 10); g.fill();
+  }
+
+  // tělo tyče
+  g.fillStyle = '#3a3f47';
+  g.beginPath(); g.roundRect(-DELKA / 2, -14, DELKA, 28, 14); g.fill();
+
+  // diody zleva doprava, dioda 0 vlevo
+  barvyLed().forEach(([r, gr, b], i) => {
+    const x = -DELKA / 2 + 12 + i * (DELKA - 24) / (POCET_LED - 1);
+    const svitivost = Math.max(r, gr, b);
+    g.fillStyle = svitivost ? `rgb(${Math.min(255, r * 2.2)},${Math.min(255, gr * 2.2)},${Math.min(255, b * 2.2)})` : '#15181d';
+    g.shadowColor = g.fillStyle; g.shadowBlur = svitivost ? 10 : 0;
+    g.beginPath(); g.arc(x, 0, 3.2, 0, 2 * Math.PI); g.fill();
+  });
+  g.shadowBlur = 0;
+
+  // úchopy na koncích
+  g.fillStyle = '#58a6ff';
+  for (const x of [-DELKA / 2, DELKA / 2]) {
+    g.beginPath(); g.arc(x, 0, 9, 0, 2 * Math.PI); g.fill();
+  }
+  g.restore();
+
+  g.fillStyle = '#eee'; g.font = '16px Segoe UI';
+  g.fillText(`${uhel.toFixed(1)}°`, 15, 25);
+
+  document.getElementById('id').textContent = ID;
+  document.getElementById('role').textContent = role;
+  document.getElementById('stav').textContent = stav;
+  document.getElementById('server').textContent = online ? 'připojeno' : 'nedostupný (' + SERVER + ')';
+  document.getElementById('uhel').textContent = uhel.toFixed(1) + '°';
+  document.getElementById('pocet').textContent = vzorky.length;
+  requestAnimationFrame(kresli);
+}
+
+// ---------- ovládání ----------
+function nastavUhel(e) {
+  const r = platno.getBoundingClientRect();
+  let x = (e.clientX - r.left) * platno.width / r.width - STRED.x;
+  let y = (e.clientY - r.top) * platno.height / r.height - STRED.y;
+  if (x < 0) { x = -x; y = -y; } // tažení za levý konec funguje stejně
+  uhel = Math.max(-80, Math.min(80, Math.atan2(-y, x) * 180 / Math.PI));
+}
+let tahne = false;
+platno.addEventListener('pointerdown', e => { tahne = true; platno.setPointerCapture(e.pointerId); nastavUhel(e); });
+platno.addEventListener('pointermove', e => { if (tahne) nastavUhel(e); });
+platno.addEventListener('pointerup', () => { tahne = false; });
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') uhel = Math.min(80, uhel + 2);   // levý konec dolů
+  if (e.key === 'ArrowRight') uhel = Math.max(-80, uhel - 2); // pravý konec dolů
+});
+
+document.title = 'Tyč ' + ID;
+document.getElementById('nadpisId').textContent = '(' + ID + ')';
+const odkaz = document.getElementById('odkaz');
+odkaz.href = SERVER; odkaz.textContent = SERVER;
+
+registrace().then(smyckaDotazu);
+kresli();
+</script>
+</body>
+</html>
