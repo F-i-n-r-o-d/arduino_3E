@@ -1,5 +1,5 @@
 # Specifikace projektu
 
-chytré hodinky s ovladačem na hry
+ovladač na hry
 
 [Použité technologie](pouzite_technologie.md) 
