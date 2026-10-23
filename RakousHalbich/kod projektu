@@ -1,0 +1,63 @@
+#include <WiFi.h>
+#include <FastLED.h>
+ 
+const char* ssid = "Jmeno_Wi-Fi_Siti";
+const char* password = "Heslo_Do_Siti";
+ 
+#define LED_PIN     23
+#define NUM_LEDS    64
+#define BRIGHTNESS  80
+ 
+CRGB leds[NUM_LEDS];
+ 
+// Herní proměnné
+float poziceKulicky = 0.0;
+float rychlost = 0.3;
+int smer = 1; // 1 = doprava, -1 = doleva
+int skore = 0;
+bool hrajeSe = true;
+ 
+void setup() {
+  Serial.begin(115200);
+ 
+  FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setBrightness(BRIGHTNESS);
+ 
+  // Připojení k Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi připojena!");
+}
+ 
+void loop() {
+  if (!hrajeSe) {
+    // Konec hry - blikání
+    fill_solid(leds, NUM_LEDS, CRGB::Red);
+    FastLED.show();
+    return;
+  }
+ 
+  // Posun kuličky
+  poziceKulicky += rychlost * smer;
+ 
+  // Kontrola, zda kulička nevyjela z tyče
+  if (poziceKulicky < 0 || poziceKulicky >= NUM_LEDS) {
+    hrajeSe = false;
+    Serial.println("Kulička vyjela z tyče – Konec hry!");
+    // TODO: Tady budeme muset doplnit odeslání JSON skóre přes HTTP/MQTT do PC
+  }
+ 
+  // Vykreslení
+  FastLED.clear();
+  int aktualniDioda = round(poziceKulicky);
+  if (aktualniDioda >= 0 && aktualniDioda < NUM_LEDS) {
+    leds[aktualniDioda] = CRGB::White; // Kulička
+  }
+ 
+  FastLED.show();
+  delay(40);
+}
+ 
