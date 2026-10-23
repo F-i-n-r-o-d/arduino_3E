@@ -1,0 +1,15 @@
+                        Použité technologie
+--Metody komunikace
+Bezdrátový přenos dat přes Wi-Fi v bezlicenčním pásmu (2.4 GHz)
+
+Sériová sběrnice I2C pro komunikaci mezi mikrokontrolérem a gyroskopem
+
+--Komunikační protokoly
+TCP/IP, HTTP / MQTT / WebSockets pro přenos naměřených dat ze cvičení
+
+--Odesílání dat
+Knihovna Adafruit NeoPixel pro ovládání LED pásu
+
+Knihovna MPU6050 pro zpracování dat ze senzoru
+
+ESP32 Wi-Fi knihovna pro Arduino
