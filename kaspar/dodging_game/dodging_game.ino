@@ -1,9 +1,11 @@
-#include <Adafruit_NeoPixel.h>
+#include <NeoPixelConnect.h>
+#include <WiFiNINA.h>
 
-#define LED_PIN 6
+#define LED_PIN 4
 #define LED_COUNT 64
 
-Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+// Inicializace pásku na pinu 6 přes PIO0
+NeoPixelConnect strip(LED_PIN, LED_COUNT, pio0, 0);
 
 const int sensorPin = A0;
 
@@ -21,17 +23,17 @@ int safeSize2;
 unsigned long lastRound = 0;
 int roundDelay = 3000;
 
+void generateObstacle();
+void drawGame();
+void loseLifeEffect();
+void gameOver();
+
 void setup() {
-  strip.begin();
-  strip.show();
-
   randomSeed(analogRead(A5));
-
   generateObstacle();
 }
 
 void loop() {
-
   int sensor = analogRead(sensorPin);
 
   // Naklonění doprava
@@ -48,12 +50,11 @@ void loop() {
 
   drawGame();
 
+  // Opraveno odečítání času
   if (millis() - lastRound > roundDelay) {
-
     bool safe = true;
 
     for (int i = 0; i < playerSize; i++) {
-
       int led = playerPos + i;
 
       bool inSafeZone =
@@ -84,11 +85,11 @@ void loop() {
 
     lastRound = millis();
   }
+
+  delay(20); // Drobná prodleva pro plynulejší snímání analogového pinu
 }
 
 void generateObstacle() {
-
-  // Bezpečné zóny 7-9 LED
   safeSize1 = random(7, 10);
   safeStart1 = random(0, 25);
 
@@ -97,11 +98,9 @@ void generateObstacle() {
 }
 
 void drawGame() {
-
-  strip.clear();
+  strip.neoPixelClear(false);
 
   for (int i = 0; i < LED_COUNT; i++) {
-
     bool safeZone = false;
 
     if (i >= safeStart1 && i < safeStart1 + safeSize1) {
@@ -113,53 +112,37 @@ void drawGame() {
     }
 
     if (safeZone) {
-      strip.setPixelColor(i, strip.Color(0, 120, 0));   // zelená
+      strip.neoPixelSetValue(i, 0, 120, 0, false);   // zelená
     } else {
-      strip.setPixelColor(i, strip.Color(255, 80, 0));  // oranžová
+      strip.neoPixelSetValue(i, 255, 80, 0, false);  // oranžová
     }
   }
 
   // Hráč
   for (int i = 0; i < playerSize; i++) {
-    strip.setPixelColor(playerPos + i, strip.Color(0, 0, 255)); // modrá
+    strip.neoPixelSetValue(playerPos + i, 0, 0, 255, false); // modrá
   }
 
   // Životy
   for (int i = 0; i < lives; i++) {
-    strip.setPixelColor(i, strip.Color(255, 255, 255)); // bílá
+    strip.neoPixelSetValue(i, 255, 255, 255, false); // bílá
   }
 
-  strip.show();
+  strip.neoPixelShow();
 }
 
 void loseLifeEffect() {
-
   for (int blink = 0; blink < 3; blink++) {
-
-    // Rozsviť vše červeně
-    for (int i = 0; i < LED_COUNT; i++) {
-      strip.setPixelColor(i, strip.Color(255, 0, 0));
-    }
-
-    strip.show();
+    strip.neoPixelFill(255, 0, 0, true);
     delay(150);
-
-    // Zhasni vše
-    strip.clear();
-    strip.show();
+    strip.neoPixelClear(true);
     delay(150);
   }
 }
 
 void gameOver() {
-
   while (true) {
-
-    for (int i = 0; i < LED_COUNT; i++) {
-      strip.setPixelColor(i, strip.Color(255, 0, 0));
-    }
-
-    strip.show();
+    strip.neoPixelFill(255, 0, 0, true);
     delay(100);
   }
 }

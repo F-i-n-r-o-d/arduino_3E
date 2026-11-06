@@ -1,169 +1,63 @@
 #include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
 #include <FastLED.h>
-#include <Wire.h>
-#include <Adafruit_MPU6050.h>
-#include <Adafruit_Sensor.h>
  
-// --- WIFI NASTAVENÍ (Změň na své hodnoty) ---
-const char* ssid = "simon - iphone";
-const char* password = "simasima";
-const char* serverUrl = "http://172.20.10.2:3000/api/score";
+const char* ssid = "Jmeno_Wi-Fi_Siti";
+const char* password = "Heslo_Do_Siti";
  
-// --- HARDWARE NASTAVENÍ ---
-#define LED_PIN     23      // PIN, na kterém je připojen LED pásek
-#define NUM_LEDS    64      // Počet diod na tyči
-#define BRIGHTNESS  100     // Jas LED (0-255)
-#define LED_TYPE    WS2812B
-#define COLOR_ORDER GRB
+#define LED_PIN     23
+#define NUM_LEDS    64
+#define BRIGHTNESS  80
  
 CRGB leds[NUM_LEDS];
-Adafruit_MPU6050 mpu;
  
-// --- HERNÍ PROMĚNNÉ ---
-float ballPos = 0.0;        // Aktuální pozice kuličky (0.0 až 63.9)
-float ballSpeed = 0.4;      // Rychlost a směr pohybu (+ doprava, - doleva)
-int direction = 1;          // 1 = jede k pacientovi B, -1 = jede k pacientovi A
-int score = 0;              // Počet úspěšných přihrávek
-bool gameRunning = true;    // Stav hry
- 
-// Odrazové zóny (prvních 6 diod a posledních 6 diod)
-const int ZONE_SIZE = 6;
+// Herní proměnné
+float poziceKulicky = 0.0;
+float rychlost = 0.3;
+int smer = 1; // 1 = doprava, -1 = doleva
+int skore = 0;
+bool hrajeSe = true;
  
 void setup() {
   Serial.begin(115200);
  
-  // Inicializace LED pásku
-  FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(BRIGHTNESS);
- 
-  // Inicializace I2C a akcelerometru (MPU6050)
-  Wire.begin();
-  if (!mpu.begin()) {
-    Serial.println("Chyba: MPU6050 nenalezen! Zkontroluj zapojení.");
-    // Hra poběží i bez senzoru v testovacím módu, ale doporučujeme zapojit
-  }
  
   // Připojení k Wi-Fi
   WiFi.begin(ssid, password);
-  Serial.print("Pripojovani k Wi-Fi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nPripojeno! IP adresa: " + WiFi.localIP().toString());
- 
-  resetGame();
+  Serial.println("\nWi-Fi připojena!");
 }
  
 void loop() {
-  if (!gameRunning) {
-    // Konec hry - blikání červeně
+  if (!hrajeSe) {
+    // Konec hry - blikání
     fill_solid(leds, NUM_LEDS, CRGB::Red);
     FastLED.show();
-    delay(500);
-    fill_solid(leds, NUM_LEDS, CRGB::Black);
-    FastLED.show();
-    delay(500);
-    return; // Čeká na restart
-  }
- 
-  // 1. Čtení akcelerometru pro detekci švihu
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
- 
-  // Pokud hráč s tyčí švihne (detekce zrychlení v ose X nebo Y)
-  bool playerSwung = (abs(a.acceleration.x) > 15.0 || abs(a.acceleration.y) > 15.0);
- 
-  // 2. Pohyb kuličky
-  ballPos += ballSpeed * direction;
- 
-  // 3. Kontrola konců tyče (Konec hry, pokud kulička vyjede ven)
-  if (ballPos < 0 || ballPos >= NUM_LEDS) {
-    gameOver();
     return;
   }
  
-  // 4. Kontrola odrazových zón
-  int currentLed = round(ballPos);
+  // Posun kuličky
+  poziceKulicky += rychlost * smer;
  
-  // Zóna Pacienta A (začátek pásku: 0 až ZONE_SIZE)
-  if (currentLed <= ZONE_SIZE && direction == -1) {
-    if (playerSwung) {
-      direction = 1; // Odraženo zpět k B
-      score++;
-      ballSpeed += 0.05; // Mírné zrychlení pro obtížnost
-      flashZone(0, ZONE_SIZE, CRGB::Green);
-    }
+  // Kontrola, zda kulička nevyjela z tyče
+  if (poziceKulicky < 0 || poziceKulicky >= NUM_LEDS) {
+    hrajeSe = false;
+    Serial.println("Kulička vyjela z tyče – Konec hry!");
+    // TODO: Tady budeme muset doplnit odeslání JSON skóre přes HTTP/MQTT do PC
   }
  
-  // Zóna Pacienta B (konec pásku: NUM_LEDS - ZONE_SIZE až NUM_LEDS)
-  if (currentLed >= (NUM_LEDS - ZONE_SIZE) && direction == 1) {
-    if (playerSwung) {
-      direction = -1; // Odraženo zpět k A
-      score++;
-      ballSpeed += 0.05;
-      flashZone(NUM_LEDS - ZONE_SIZE, NUM_LEDS, CRGB::Green);
-    }
-  }
- 
-  // 5. Vykreslení na LED pásek
+  // Vykreslení
   FastLED.clear();
- 
-  // Vykreslení odrazových zón (jemně modře)
-  for (int i = 0; i <= ZONE_SIZE; i++) leds[i] = CRGB::Blue;
-  for (int i = NUM_LEDS - ZONE_SIZE; i < NUM_LEDS; i++) leds[i] = CRGB::Blue;
- 
-  // Vykreslení samotné kuličky (jasně bílá/žlutá)
-  leds[currentLed] = CRGB::White;
- 
-  FastLED.show();
-  delay(30); // Rychlost snímkování hry
-}
- 
-void resetGame() {
-  ballPos = NUM_LEDS / 2; // Start uprostřed
-  ballSpeed = 0.5;
-  direction = 1;
-  score = 0;
-  gameRunning = true;
-}
- 
-void flashZone(int start, int end, CRGB color) {
-  for (int i = start; i < end; i++) leds[i] = color;
-  FastLED.show();
-  delay(100);
-}
- 
-void gameOver() {
-  gameRunning = false;
-  Serial.println("Hra skončila! Kulička vyjela z tyče.");
-  Serial.print("Skóre (počet přihrávek): ");
-  Serial.println(score);
- 
-  // Odeslání dat přes HTTP do počítače ve formátu JSON
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    http.begin(serverUrl);
-    http.addHeader("Content-Type", "application/json");
- 
-    // Vytvoření JSON zprávy pomocí knihovny ArduinoJson
-    JsonDocument doc;
-    doc["game"] = "1D_Ping_Pong";
-    doc["score"] = score;
-    doc["status"] = "game_over";
- 
-    String requestBody;
-    serializeJson(doc, requestBody);
- 
-    int httpResponseCode = http.POST(requestBody);
-    if (httpResponseCode > 0) {
-      Serial.println("Skóre úspěšně odesláno na počítač!");
-    } else {
-      Serial.print("Chyba při odesílání skóre: ");
-      Serial.println(httpResponseCode);
-    }
-    http.end();
+  int aktualniDioda = round(poziceKulicky);
+  if (aktualniDioda >= 0 && aktualniDioda < NUM_LEDS) {
+    leds[aktualniDioda] = CRGB::White; // Kulička
   }
+ 
+  FastLED.show();
+  delay(40);
 }
+ 
