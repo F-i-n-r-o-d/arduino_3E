@@ -1,0 +1,12 @@
+{
+  "name": "rehab-duel-server",
+  "private": true,
+  "description": "Server a webová stránka pro hru dvou rehabilitačních tyčí",
+  "scripts": {
+    "start": "node server.js",
+    "simulace": "node simulace.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="cs" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RehabRotator Pro - Rehabilitační Systém</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eefbff',
+                            100: '#d9f5ff',
+                            500: '#00b4d8',
+                            600: '#0096c7',
+                            700: '#03045e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .led-glow-active {
+            box-shadow: 0 0 10px #00f0ff, 0 0 18px #00b4d8;
+            background-color: #00f0ff !important;
+        }
+        .led-glow-success {
+            box-shadow: 0 0 12px #10b981, 0 0 20px #059669;
+            background-color: #10b981 !important;
+        }
+        .led-box-glow {
+            box-shadow: 0 0 15px rgba(234, 179, 8, 0.4);
+        }
+        pre::-webkit-scrollbar {
+            height: 8px;
+            width: 8px;
+        }
+        pre::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+        pre::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
+        }
+        .animate-float {
+            animation: float 3s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans flex flex-col justify-between selection:bg-cyan-500 selection:text-white">
+
+    <!-- Header / Navbar -->
+    <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                    <i class="fa-solid font-bold fa-seedling text-slate-950 text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base sm:text-lg text-white leading-tight">RehabRotator <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 font-mono border border-cyan-500/30 ml-1">v2.0</span></h1>
+                    <p class="text-xs text-slate-400 hidden sm:block">Chytrá rehabilitace rotace s LED & gamifikací</p>
+                </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <div class="flex items-center space-x-1 sm:space-x-2 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                <button id="tab-dev-btn" onclick="switchTab('developer')" class="px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 bg-cyan-500 text-slate-950 font-semibold shadow-md flex items-center">
+                    <i class="fa-solid fa-code mr-1.5"></i><span class="hidden sm:inline">Režim</span> Vývojář
+                </button>
+                <button id="tab-patient-btn" onclick="switchTab('patient')" class="px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-200 transition-all duration-200 flex items-center">
+                    <i class="fa-solid fa-gamepad mr-1.5 text-emerald-400"></i>Hra <span class="hidden sm:inline">(Zalévání)</span>
+                </button>
+                <button id="tab-code-btn" onclick="switchTab('code')" class="px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-200 transition-all duration-200 flex items-center">
+                    <i class="fa-solid fa-microchip mr-1.5 text-amber-400"></i>Arduino Kód
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full">
+
+        <!-- ================= 1. DEVELOPER (DEBUG) MODE ================= -->
+        <div id="section-developer" class="space-y-8">
+            <div class="bg-gradient-to-r from-cyan-950/40 to-slate-900 border border-cyan-800/30 rounded-2xl p-6 backdrop-blur">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                        <span class="text-xs font-mono uppercase tracking-widest text-cyan-400 bg-cyan-500/10 px-2.5 py-1 rounded-md border border-cyan-500/30">Lokalita: Vývojářské rozhraní</span>
+                        <h2 class="text-2xl font-extrabold text-white mt-2">Diagnostika & Simulace Hardware</h2>
+                        <p class="text-sm text-slate-400 mt-1">Sledujte chování 64 LED diod, surová data z MPU6050 a ověřujte komunikaci.</p>
+                    </div>
+                    <div class="flex items-center space-x-3 bg-slate-950 px-4 py-2.5 rounded-xl border border-slate-800">
+                        <div class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+                        <span class="text-xs font-mono text-slate-300">Wi-Fi: <strong class="text-emerald-400">Připojeno (192.168.4.1)</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Metrics Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 backdrop-blur shadow-lg">
+                    <div class="flex justify-between items-start text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Úhel Rotace</span>
+                        <i class="fa-solid fa-compass text-cyan-400"></i>
+                    </div>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="dev-stat-angle" class="text-4xl font-extrabold font-mono text-white">0</span>
+                        <span class="text-xl font-bold text-cyan-400">°</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-2">Rozsah: 0° až 64°</p>
+                </div>
+
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 backdrop-blur shadow-lg">
+                    <div class="flex justify-between items-start text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Progres Výkonu</span>
+                        <i class="fa-solid fa-chart-line text-emerald-400"></i>
+                    </div>
+                    <div class="flex items-baseline space-x-2">
+                        <span id="dev-stat-progress" class="text-4xl font-extrabold font-mono text-white">0</span>
+                        <span class="text-xl font-bold text-emerald-400">%</span>
+                    </div>
+                    <div class="w-full bg-slate-700 h-2 rounded-full mt-3 overflow-hidden">
+                        <div id="dev-stat-progress-bar" class="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full w-0 transition-all duration-150"></div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 backdrop-blur shadow-lg">
+                    <div class="flex justify-between items-start text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Aktivní Směr</span>
+                        <i class="fa-solid fa-arrows-left-right text-purple-400"></i>
+                    </div>
+                    <div class="h-9 flex items-center">
+                        <span id="dev-stat-direction" class="text-sm font-bold text-slate-200">
+                            Středová pozice (0°)
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-2">Snímá se osa Z</p>
+                </div>
+
+                <div class="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 backdrop-blur shadow-lg">
+                    <div class="flex justify-between items-start text-slate-400 mb-2">
+                        <span class="text-xs font-semibold uppercase tracking-wider">Režim Snímání</span>
+                        <i class="fa-solid fa-sliders text-amber-400"></i>
+                    </div>
+                    <select id="dev-mode-select" onchange="syncSimulation()" class="bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full p-2 mt-1 font-medium">
+                        <option value="left-to-right">Jednostranný (0 -> 64)</option>
+                        <option value="center-out">Symetrický od středu</option>
+                    </select>
+                    <p class="text-xs text-slate-400 mt-2">Způsob rozsvěcování</p>
+                </div>
+            </div>
+
+            <!-- LED Strip Visualization -->
+            <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl relative">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <div>
+                        <h3 class="text-lg font-bold text-white flex items-center">
+                            <i class="fa-solid fa-microchip text-cyan-400 mr-2.5"></i>Vizualizace LED Tyče (64 Diody)
+                        </h3>
+                        <p class="text-xs text-slate-400">Fyzické uspořádání včetně středového boxu (LED 28–36)</p>
+                    </div>
+                    <div class="flex items-center space-x-4 text-xs font-medium">
+                        <span class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-slate-800 mr-1.5 border border-slate-700"></span>Zhasnuto</span>
+                        <span class="flex items-center"><span class="w-2.5 h-2.5 rounded-full bg-cyan-400 mr-1.5 shadow-[0_0_8px_#00f0ff]"></span>Svit</span>
+                        <span class="flex items-center"><span class="w-2.5 h-2.5 rounded-md bg-amber-500/40 border border-amber-500/80 mr-1.5"></span>Box (28-36)</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 p-4 sm:p-6 rounded-xl border border-slate-800 shadow-inner overflow-x-auto">
+                    <div class="min-w-[700px] bg-slate-950 border-2 border-slate-800 rounded-2xl p-3 flex items-center justify-between relative shadow-2xl">
+                        <!-- Left Segment -->
+                        <div class="flex-1 flex justify-around items-center px-1" id="led-segment-left"></div>
+                        <!-- Center Box -->
+                        <div class="relative bg-gradient-to-b from-slate-800 to-slate-900 border-2 border-amber-500/60 rounded-xl px-3 py-2 mx-2 flex flex-col items-center justify-center min-w-[170px] shadow-lg led-box-glow">
+                            <div class="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-slate-900 px-2 py-0.5 rounded-full border border-amber-500/50 flex items-center space-x-1">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                <span class="text-[9px] font-mono font-bold text-amber-400 uppercase">Arduino + MPU6050</span>
+                            </div>
+                            <div class="text-[10px] text-slate-400 font-mono mb-1.5 mt-1">Středová krabička (LED 28–36)</div>
+                            <div class="flex justify-between items-center w-full gap-1" id="led-segment-center"></div>
+                        </div>
+                        <!-- Right Segment -->
+                        <div class="flex-1 flex justify-around items-center px-1" id="led-segment-right"></div>
+                    </div>
+                </div>
+
+                <!-- Slider & Controls -->
+                <div class="mt-6 bg-slate-900/80 rounded-xl p-5 border border-slate-800 grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                    <div class="md:col-span-8 space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <label for="angle-slider" class="font-medium text-slate-300">Simulace náklonu rotace:</label>
+                            <span class="font-mono text-cyan-400 font-bold"><span id="slider-val">0</span>° / 64°</span>
+                        </div>
+                        <input type="range" id="angle-slider" min="0" max="64" value="0" step="1" 
+                               class="w-full h-3 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400 border border-slate-700">
+                        <div class="flex justify-between text-[11px] text-slate-400 font-mono px-1">
+                            <span>0° (Výchozí)</span>
+                            <span>32° (Polovina)</span>
+                            <span>64° (Cílové Maximum)</span>
+                        </div>
+                    </div>
+
+                    <div class="md:col-span-4 flex flex-col justify-center space-y-2 border-t md:border-t-0 md:border-l border-slate-800 pt-4 md:pt-0 md:pl-6">
+                        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Ovládání klávesnicí</span>
+                        <div class="flex items-center space-x-2 text-xs text-slate-300">
+                            <kbd class="px-2 py-1 bg-slate-800 border border-slate-700 rounded shadow font-mono text-cyan-400">←</kbd>
+                            <kbd class="px-2 py-1 bg-slate-800 border border-slate-700 rounded shadow font-mono text-cyan-400">→</kbd>
+                            <span>Změna o ±1°</span>
+                        </div>
+                        <div class="flex space-x-2 pt-1">
+                            <button onclick="resetAngle()" class="flex-1 py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition border border-slate-700">
+                                <i class="fa-solid fa-rotate-left mr-1"></i>Reset (0°)
+                            </button>
+                            <button onclick="setMaxAngle()" class="flex-1 py-1.5 px-3 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 rounded-lg text-xs font-medium transition border border-cyan-500/30">
+                                <i class="fa-solid fa-flag-checkered mr-1"></i>Max (64°)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Telemetry Stream -->
+            <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-bold text-slate-200 text-sm uppercase tracking-wider flex items-center">
+                        <i class="fa-solid fa-terminal text-emerald-400 mr-2"></i>Sériový protokol / Wi-Fi JSON Stream
+                    </h3>
+                    <span class="text-xs font-mono text-slate-400 bg-slate-900 px-3 py-1 rounded-md border border-slate-800">Baud: 115200</span>
+                </div>
+                <div class="bg-slate-900 rounded-xl p-4 font-mono text-xs text-emerald-400 border border-slate-800 shadow-inner overflow-x-auto">
+                    <div class="flex space-x-4 text-slate-400 mb-1 border-b border-slate-800 pb-1">
+                        <span class="w-24">Čas</span>
+                        <span class="w-20">Zařízení</span>
+                        <span class="w-16">Úhel</span>
+                        <span class="w-16">LED</span>
+                        <span>JSON Payload</span>
+                    </div>
+                    <div id="json-stream" class="space-y-1 max-h-32 overflow-y-auto"></div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ================= 2. PATIENT MODE (GAMIFICATION - WATERING THE FLOWER) ================= -->
+        <div id="section-patient" class="hidden space-y-8">
+            <div class="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-cyan-950/40 border border-emerald-800/30 rounded-2xl p-6 sm:p-8 backdrop-blur text-center relative overflow-hidden shadow-2xl">
+                <div class="absolute -right-10 -bottom-10 text-emerald-500/10 text-9xl pointer-events-none">
+                    <i class="fa-solid fa-seedling"></i>
+                </div>
+                <span class="text-xs font-mono uppercase tracking-widest text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 inline-block mb-3">
+                    <i class="fa-solid fa-heart-pulse mr-1.5"></i>Gamifikovaná Rehabilitace
+                </span>
+                <h2 class="text-3xl font-extrabold text-white">Zalévání Kouzelné Květiny 🌻</h2>
+                <p class="text-sm sm:text-base text-slate-300 max-w-2xl mx-auto mt-2">
+                    Otáčejte rehabilitační tyčí k <strong id="target-side-label" class="text-cyan-400">PRAVÉ STRANĚ</strong> až do maximálního úhlu <strong>64°</strong>. Jakmile dosáhnete maxima, podržte pozici po dobu odpočtu a květina se napije a vykvete!
+                </p>
+
+                <!-- Game Stats Bar -->
+                <div class="flex flex-wrap justify-center items-center gap-6 mt-6 pt-6 border-t border-slate-800/80">
+                    <div class="bg-slate-950/80 px-5 py-2.5 rounded-xl border border-slate-800 flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                            <i class="fa-solid fa-trophy"></i>
+                        </div>
+                        <div class="text-left">
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider">Splněno zálivek</div>
+                            <div id="game-score" class="text-lg font-bold text-white font-mono">0</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-950/80 px-5 py-2.5 rounded-xl border border-slate-800 flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold">
+                            <i class="fa-solid fa-arrows-spin"></i>
+                        </div>
+                        <div class="text-left">
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider">Aktuální Úkol</div>
+                            <div id="game-task-name" class="text-sm font-bold text-cyan-400">Zahřejte rotaci vpravo</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interactive Garden Stage & Flower -->
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                
+                <!-- Left: Garden Visualizer -->
+                <div class="lg:col-span-7 bg-slate-950 border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center relative min-h-[420px] overflow-hidden">
+                    <!-- Background Sun or clouds -->
+                    <div class="absolute top-6 right-6 w-16 h-16 rounded-full bg-amber-400/20 blur-xl animate-pulse"></div>
+                    
+                    <!-- Watering Animation Overlay Effect -->
+                    <div id="watering-effect" class="absolute inset-0 bg-cyan-500/10 backdrop-blur-[1px] opacity-0 transition-opacity duration-300 pointer-events-none flex items-center justify-center">
+                        <div class="text-cyan-300 text-6xl animate-bounce">💧 🚿 ✨</div>
+                    </div>
+
+                    <!-- Flower Stage container -->
+                    <div class="text-center z-10 space-y-4">
+                        <div id="flower-container" class="text-8xl sm:text-9xl transition-all duration-500 transform animate-float">
+                            🌱
+                        </div>
+                        <div class="space-y-1">
+                            <h3 id="flower-stage-title" class="text-xl font-bold text-white">Semínko čeká na zálivku</h3>
+                            <p id="flower-stage-desc" class="text-sm text-slate-400 max-w-sm mx-auto">Dosáhněte náklonu 64° pro spuštění zavlažovacího cyklu.</p>
+                        </div>
+                    </div>
+
+                    <!-- Countdown Box (appears at 64°) -->
+                    <div id="countdown-box" class="hidden absolute bottom-6 bg-slate-900/95 border-2 border-emerald-500 px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-4 animate-bounce">
+                        <div class="w-10 h-10 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center font-black text-xl font-mono" id="countdown-num">3</div>
+                        <div>
+                            <div class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Držte pozici!</div>
+                            <div class="text-xs text-slate-300">Zalévání probíhá...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Patient Controls & Realtime Feedback -->
+                <div class="lg:col-span-5 space-y-6">
+                    <div class="bg-slate-950 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm font-semibold text-slate-300">Sleduvaný Úhel Rotace</span>
+                            <span class="font-mono text-2xl font-black text-cyan-400"><span id="patient-angle-display">0</span>° / 64°</span>
+                        </div>
+
+                        <!-- Big Progress Bar -->
+                        <div class="space-y-2">
+                            <div class="w-full bg-slate-900 h-5 rounded-2xl p-1 border border-slate-800 overflow-hidden shadow-inner">
+                                <div id="patient-progress-bar" class="bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 h-full w-0 rounded-xl transition-all duration-150"></div>
+                            </div>
+                            <div class="flex justify-between text-xs text-slate-400 font-mono">
+<span>0° (Klud)</span>
+                                <span>32° (Střed)</span>
+                                <span>64° (Cíl)</span>
+                            </div>
+                        </div>
+
+                        <!-- Status message box -->
+                        <div id="patient-status-box" class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 text-center">
+                            <div class="text-xs text-slate-400 uppercase tracking-wider">Stav Cvičení</div>
+                            <div id="patient-status-text" class="text-base font-bold text-slate-200 mt-1">Zahajte pohyb otáčením tyče</div>
+                        </div>
+
+                        <!-- Patient Simulation Quick Helper -->
+                        <div class="pt-2 border-t border-slate-900">
+                            <span class="text-xs text-slate-500 block mb-2 text-center">Pro testování použijte posuvník z vývojářského režimu nebo šipky klávesnice</span>
+                            <button onclick="switchTab('developer')" class="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-cyan-400 rounded-xl font-medium text-xs transition border border-slate-800 flex items-center justify-center">
+                                <i class="fa-solid fa-sliders mr-2"></i>Přejít na posuvník náklonu
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+
+        <!-- ================= 3. ARDUINO C++ CODE TAB ================= -->
+        <div id="section-code" class="hidden space-y-8">
+            <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <div>
+                        <span class="text-xs font-mono uppercase tracking-widest text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-md border border-amber-500/30">Firmware</span>
+                        <h2 class="text-xl font-bold text-white mt-2 flex items-center">
+                            <i class="fa-solid fa-code text-amber-400 mr-3"></i>Arduino Zdrojový Kód (`RehabDevice.ino`)
+                        </h2>
+                        <p class="text-sm text-slate-400">Kompletní kód pro Arduino Uno, MPU6050 gyroskop a 64x WS2812B LED pásek.</p>
+                    </div>
+                    <button onclick="copyArduinoCode()" class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-cyan-400 font-medium text-xs rounded-xl transition flex items-center border border-slate-800 shadow-md">
+                        <i class="fa-regular fa-copy mr-2" id="copy-icon"></i><span id="copy-text">Kopírovat kód</span>
+                    </button>
+                </div>
+
+                <!-- Hardware Wiring Info -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs">
+                        <span class="font-bold text-amber-400 block mb-1">1. MPU-6050 Senzor</span>
+                        <p class="text-slate-400">SDA -> Pin A4, SCL -> Pin A5, VCC -> 5V, GND -> GND</p>
+                    </div>
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs">
+                        <span class="font-bold text-cyan-400 block mb-1">2. WS2812B LED Pásek (64 LED)</span>
+                        <p class="text-slate-400">DIN -> Digital Pin 6 (přes rezistor 470Ω), +5V -> Externí zdroj</p>
+                    </div>
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 text-xs">
+                        <span class="font-bold text-emerald-400 block mb-1">3. Wi-Fi Modul / ESP</span>
+                        <p class="text-slate-400">UART Serial komunikace (115200 baud), JSON payload stream</p>
+                    </div>
+                </div>
+
+                <!-- Code block -->
+                <div class="relative rounded-xl overflow-hidden border border-slate-800">
+                    <pre class="bg-slate-900 p-5 font-mono text-xs text-slate-300 overflow-x-auto leading-relaxed max-h-[550px]"><code id="arduino-code-block">/*
+ * =====================================================================================
+ * Projekt: RehabRotator - Rehabilitační Pomůcka s Měřením Rotace
+ * Hardware: Arduino Uno, MPU6050 Gyroskop, 64x WS2812B LED Pás, Wi-Fi Modul
+ * Popis: Čtenie úhlu rotace, řízení 64 LED (středový box 28-36) a odesílání dat.
+ * =====================================================================================
+ */
+
+#include &lt;Wire.h&gt;
+#include &lt;Adafruit_NeoPixel.h&gt;
+#include &lt;MPU6050_tockn.h&gt;
+
+// --- PINOUT A KONFIGURACE ---
+#define LED_PIN          6       // Datový pin pro WS2812B
+#define NUM_LEDS         64      // Celkový počet diod
+#define CENTER_BOX_START 28      // Začátek středového boxu s elektronikou
+#define CENTER_BOX_END   36      // Konec středového boxu s elektronikou
+
+Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+MPU6050 mpu6050(Wire);
+
+float currentAngle = 0.0;
+int activeLedsCount = 0;
+unsigned long lastSendTime = 0;
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  
+  mpu6050.begin();
+  mpu6050.calcGyroOffsets(true); // Kalibrace při startu
+
+  strip.begin();
+  strip.show(); // Zhasnout LED
+  strip.setBrightness(120);
+
+  Serial.println("RehabRotator Arduino Firmware Inicializován.");
+}
+
+void loop() {
+  mpu6050.update();
+  currentAngle = abs(mpu6050.getAngleZ());
+
+  if (currentAngle > 64.0) currentAngle = 64.0;
+
+  // Přepočet úhlu na počet rozsvícených LED (1 stupeň = 1 LED)
+  activeLedsCount = map((int)currentAngle, 0, 64, 0, NUM_LEDS);
+
+  // Aktualizace LED pásu
+  updateLedStrip(activeLedsCount);
+
+  // Odeslání telemetrie každých 200ms
+  if (millis() - lastSendTime > 200) {
+    sendTelemetryJSON(currentAngle, activeLedsCount);
+    lastSendTime = millis();
+  }
+}
+
+void updateLedStrip(int count) {
+  for (int i = 0; i &lt; NUM_LEDS; i++) {
+    if (i &lt; count) {
+      if (count &gt;= NUM_LEDS) {
+        strip.setPixelColor(i, strip.Color(16, 185, 129)); // Zelená (Max)
+      } else if (i &gt;= CENTER_BOX_START &amp;&amp; i &lt;= CENTER_BOX_END) {
+        strip.setPixelColor(i, strip.Color(245, 158, 11)); // Jantarová (Box)
+      } else {
+        strip.setPixelColor(i, strip.Color(0, 240, 255));  // Azurová
+      }
+    } else {
+      strip.setPixelColor(i, strip.Color(0, 0, 0)); // Zhasnuto
+    }
+  }
+  strip.show();
+}
+
+void sendTelemetryJSON(float angle, int leds) {
+  int progress = (int)((angle / 64.0) * 100.0);
+  
+  String json = "{";
+  json += "\"angle\":" + String(angle, 1) + ",";
+  json += "\"leds\":" + String(leds) + ",";
+  json += "\"progress\":" + String(progress);
+  json += "}";
+
+  Serial.println(json);
+}
+</code></pre>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 bg-slate-950 py-4 text-center text-xs text-slate-400">
+        <p>RehabRotator Pro &copy; 2026 | Rehabilitační systém s LED tyčí a gamifikací pro pacienty</p>
+    </footer>
+
+    <!-- JAVASCRIPT APP LOGIC -->
+    <script>
+        const TOTAL_LEDS = 64;
+        const CENTER_START = 28;
+        const CENTER_END = 36;
+
+        let currentAngle = 0;
+        let fillMode = 'left-to-right';
+        const ledElements = [];
+
+        // Game State variables
+        let gameScore = 0;
+        let currentSide = 'right'; // 'right' or 'left'
+        let countdownActive = false;
+        let countdownTimer = null;
+        let countdownSeconds = 3;
+        let flowerState = 0; // 0: seed, 1: sprout, 2: stem, 3: bloom
+
+        // DOM elements
+        const ledSegLeft = document.getElementById('led-segment-left');
+        const ledSegCenter = document.getElementById('led-segment-center');
+        const ledSegRight = document.getElementById('led-segment-right');
+        
+        const angleSlider = document.getElementById('angle-slider');
+        const sliderValDisplay = document.getElementById('slider-val');
+
+        const devStatAngle = document.getElementById('dev-stat-angle');
+        const devStatProgress = document.getElementById('dev-stat-progress');
+        const devStatProgressBar = document.getElementById('dev-stat-progress-bar');
+        const devStatDirection = document.getElementById('dev-stat-direction');
+        
+        const patientAngleDisplay = document.getElementById('patient-angle-display');
+        const patientProgressBar = document.getElementById('patient-progress-bar');
+        const patientStatusText = document.getElementById('patient-status-text');
+        
+        const flowerContainer = document.getElementById('flower-container');
+        const flowerStageTitle = document.getElementById('flower-stage-title');
+        const flowerStageDesc = document.getElementById('flower-stage-desc');
+        const wateringEffect = document.getElementById('watering-effect');
+        const countdownBox = document.getElementById('countdown-box');
+        const countdownNum = document.getElementById('countdown-num');
+        const gameScoreDisplay = document.getElementById('game-score');
+        const gameTaskName = document.getElementById('game-task-name');
+        const targetSideLabel = document.getElementById('target-side-label');
+        const jsonStream = document.getElementById('json-stream');
+
+        // Initialize LED grid
+        function initLeds() {
+            ledSegLeft.innerHTML = '';
+            ledSegCenter.innerHTML = '';
+            ledSegRight.innerHTML = '';
+
+            for (let i = 0; i < TOTAL_LEDS; i++) {
+                const ledNode = document.createElement('div');
+                ledNode.className = 'w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full bg-slate-800 transition-all duration-150 border border-slate-700/60 relative group cursor-pointer';
+                
+                const tooltip = document.createElement('span');
+                tooltip.className = 'absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-900 text-[9px] text-slate-300 font-mono px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition pointer-events-none z-10 border border-slate-700';
+                tooltip.innerText = `#${i + 1}`;
+                ledNode.appendChild(tooltip);
+
+                ledElements.push(ledNode);
+
+                if (i < CENTER_START) {
+                    ledSegLeft.appendChild(ledNode);
+                } else if (i >= CENTER_START && i <= CENTER_END) {
+                    ledSegCenter.appendChild(ledNode);
+                } else {
+                    ledSegRight.appendChild(ledNode);
+                }
+            }
+        }
+
+        // Sync simulation state across both modes
+        function syncSimulation() {
+            currentAngle = parseInt(angleSlider.value);
+            fillMode = document.getElementById('dev-mode-select').value;
+            
+            // Update Developer View
+            sliderValDisplay.textContent = currentAngle;
+            devStatAngle.textContent = currentAngle;
+
+            const progress = Math.round((currentAngle / TOTAL_LEDS) * 100);
+            devStatProgress.textContent = progress;
+            devStatProgressBar.style.width = `${progress}%`;
+
+            if (currentAngle === 0) {
+                devStatDirection.textContent = 'Středová pozice (0°)';
+            } else {
+                devStatDirection.textContent = `Aktivní náklon (${currentAngle}°)`;
+            }
+
+            // Update Patient View
+            patientAngleDisplay.textContent = currentAngle;
+            patientProgressBar.style.width = `${progress}%`;
+
+            // Update LEDs
+            ledElements.forEach((led, index) => {
+                let isActive = false;
+                if (fillMode === 'left-to-right') {
+                    isActive = index < currentAngle;
+                } else if (fillMode === 'center-out') {
+                    const centerIdx = 32;
+                    const radius = Math.floor(currentAngle / 2);
+                    isActive = Math.abs(index - centerIdx) <= radius;
+                }
+
+                if (isActive) {
+                    if (currentAngle === TOTAL_LEDS) {
+                        led.className = 'w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full transition-all duration-150 led-glow-success border border-emerald-300 relative group cursor-pointer';
+                    } else if (index >= CENTER_START && index <= CENTER_END) {
+                        led.className = 'w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full transition-all duration-150 bg-amber-400 shadow-[0_0_10px_#f59e0b] border border-amber-200 relative group cursor-pointer';
+                    } else {
+                        led.className = 'w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full transition-all duration-150 led-glow-active border border-cyan-200 relative group cursor-pointer';
+                    }
+                } else {
+                    led.className = 'w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full bg-slate-800 transition-all duration-150 border border-slate-700/60 relative group cursor-pointer';
+                }
+            });
+
+            // Game Logic & Watering Trigger Check
+            checkGameProgress(currentAngle);
+
+            // Log stream
+            addTelemetryLog(currentAngle, progress);
+        }
+
+        // Gamification / Watering Flower Logic
+        function checkGameProgress(angle) {
+            if (angle >= 64) {
+                patientStatusText.innerHTML = `<span class="text-emerald-400 font-bold">🎉 Dosaženo maximum (64°)! Zalévání spuštěno...</span>`;
+                
+                if (!countdownActive) {
+                    startWateringCountdown();
+                }
+            } else {
+                patientStatusText.innerHTML = `Otáčejte tyčí k cíli (${64 - angle}° do splnění)`;
+                if (countdownActive && angle < 55) {
+                    // Cancel countdown if user moves back too fast
+                    cancelWateringCountdown();
+                }
+            }
+        }
+
+        function startWateringCountdown() {
+            countdownActive = true;
+            countdownSeconds = 3;
+            countdownNum.textContent = countdownSeconds;
+            countdownBox.classList.remove('hidden');
+            wateringEffect.classList.remove('opacity-0');
+            wateringEffect.classList.add('opacity-100');
+
+            countdownTimer = setInterval(() => {
+                countdownSeconds--;
+                if (countdownSeconds > 0) {
+                    countdownNum.textContent = countdownSeconds;
+                } else {
+                    clearInterval(countdownTimer);
+                    completeWateringCycle();
+                }
+            }, 1000);
+        }
+
+        function cancelWateringCountdown() {
+            clearInterval(countdownTimer);
+            countdownActive = false;
+            countdownBox.classList.add('hidden');
+            wateringEffect.classList.remove('opacity-100');
+            wateringEffect.classList.add('opacity-0');
+        }
+
+        function completeWateringCycle() {
+            clearInterval(countdownTimer);
+            countdownActive = false;
+            countdownBox.classList.add('hidden');
+            wateringEffect.classList.remove('opacity-100');
+            wateringEffect.classList.add('opacity-0');
+
+            // Success! Flower blooms
+            gameScore++;
+            gameScoreDisplay.textContent = gameScore;
+
+            // Cycle flower stage or reset with new side
+            flowerState = (flowerState + 1) % 4;
+            updateFlowerVisuals();
+
+            // Switch side for bilateral training
+            currentSide = currentSide === 'right' ? 'left' : 'right';
+            targetSideLabel.textContent = currentSide === 'right' ? 'PRAVÉ STRANĚ' : 'LEVÉ STRANĚ';
+            gameTaskName.textContent = currentSide === 'right' ? 'Rotace vpravo' : 'Rotace vlevo';
+
+            // Reset slider back to 0 gently for next round
+            setTimeout(() => {
+                angleSlider.value = 0;
+                syncSimulation();
+            }, 1500);
+        }
+
+        function updateFlowerVisuals() {
+            if (flowerState === 0) {
+                flowerContainer.textContent = '🌱';
+                flowerStageTitle.textContent = 'Semínko zasazeno';
+                flowerStageDesc.textContent = 'Začněte nový cyklus rotace.';
+            } else if (flowerState === 1) {
+                flowerContainer.textContent = '🌿';
+                flowerStageTitle.textContent = 'Rostlinka klíčí';
+                flowerStageDesc.textContent = 'Skvělá práce! Ještě několik zálivek.';
+            } else if (flowerState === 2) {
+                flowerContainer.textContent = '🪴';
+                flowerStageTitle.textContent = 'Roste stonek a poupě';
+                flowerStageDesc.textContent = 'Blížíte se k plnému rozkvětu!';
+            } else {
+                flowerContainer.textContent = '🌻';
+                flowerStageTitle.textContent = 'Nádherný plný rozkvět! 🌸';
+                flowerStageDesc.textContent = 'Úspěšně jste dokončili rehabilitační cyklus obou stran!';
+            }
+        }
+
+        // Add telemetry log line
+        function addTelemetryLog(angle, progress) {
+            const time = new Date().toLocaleTimeString('cs-CZ');
+            const logLine = document.createElement('div');
+            logLine.className = 'flex space-x-4 text-emerald-400 font-mono text-[11px] hover:bg-slate-800/50 p-0.5 rounded';
+            logLine.innerHTML = `
+                <span class="w-24 text-slate-500">${time}</span>
+                <span class="w-20 text-purple-400">MPU6050</span>
+                <span class="w-16 font-bold text-cyan-300">${angle}°</span>
+                <span class="w-16 text-amber-300">${angle}/64</span>
+                <span class="text-slate-300">{"angle": ${angle}.0, "progress": ${progress}%}</span>
+            `;
+            jsonStream.prepend(logLine);
+            if (jsonStream.children.length > 15) {
+                jsonStream.removeChild(jsonStream.lastChild);
+            }
+        }
+
+        // Tab Switching Logic
+        function switchTab(tabName) {
+            const secDev = document.getElementById('section-developer');
+            const secPatient = document.getElementById('section-patient');
+            const secCode = document.getElementById('section-code');
+            
+            const btnDev = document.getElementById('tab-dev-btn');
+            const btnPatient = document.getElementById('tab-patient-btn');
+            const btnCode = document.getElementById('tab-code-btn');
+
+            // Hide all sections
+            secDev.classList.add('hidden');
+            secPatient.classList.add('hidden');
+            secCode.classList.add('hidden');
+
+            // Reset buttons
+            btnDev.className = 'px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-200 transition-all duration-200 flex items-center';
+            btnPatient.className = 'px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-200 transition-all duration-200 flex items-center';
+            btnCode.className = 'px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium text-slate-400 hover:text-slate-200 transition-all duration-200 flex items-center';
+
+            if (tabName === 'developer') {
+                secDev.classList.remove('hidden');
+                btnDev.className = 'px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 bg-cyan-500 text-slate-950 font-semibold shadow-md flex items-center';
+            } else if (tabName === 'patient') {
+                secPatient.classList.remove('hidden');
+                btnPatient.className = 'px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 bg-cyan-500 text-slate-950 font-semibold shadow-md flex items-center';
+            } else if (tabName === 'code') {
+                secCode.classList.remove('hidden');
+                btnCode.className = 'px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all duration-200 bg-cyan-500 text-slate-950 font-semibold shadow-md flex items-center';
+            }
+        }
+
+        // Helper Actions
+        function resetAngle() {
+            angleSlider.value = 0;
+            syncSimulation();
+        }
+
+        function setMaxAngle() {
+            angleSlider.value = 64;
+            syncSimulation();
+        }
+
+        // Copy Arduino Code
+        function copyArduinoCode() {
+            const codeText = document.getElementById('arduino-code-block').innerText;
+            const textarea = document.createElement('textarea');
+            textarea.value = codeText;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            const copyText = document.getElementById('copy-text');
+            const copyIcon = document.getElementById('copy-icon');
+
+            copyText.textContent = 'Zkopírováno!';
+            copyIcon.className = 'fa-solid fa-check mr-2 text-emerald-400';
+
+            setTimeout(() => {
+                copyText.textContent = 'Kopírovat kód';
+                copyIcon.className = 'fa-regular fa-copy mr-2';
+            }, 2500);
+        }
+
+        // Event listeners
+        angleSlider.addEventListener('input', syncSimulation);
+
+        document.addEventListener('keydown', (e) => {
+            let val = parseInt(angleSlider.value);
+            if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+                if (val < TOTAL_LEDS) {
+                    angleSlider.value = val + 1;
+                    syncSimulation();
+                }
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+                if (val > 0) {
+                    angleSlider.value = val - 1;
+                    syncSimulation();
+                }
+            }
+        });
+
+        // Initialize on load
+        window.onload = function() {
+            initLeds();
+            syncSimulation();
+        };
+    </script>
+</body>
+</html>
