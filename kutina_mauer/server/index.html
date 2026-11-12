@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rehab duel</title>
+<style>
+  body { font-family: "Segoe UI", sans-serif; background: #181818; color: #eee; margin: 0; padding: 20px 16px; text-align: center; }
+  h1 { margin: 0 0 4px; }
+  #stav { color: #8b949e; margin: 0 0 24px; min-height: 1.4em; }
+  #stav.konec { color: #e3b341; font-size: 1.3em; font-weight: 600; }
+  [hidden] { display: none !important; }
+
+  .hrac { max-width: 760px; margin: 0 auto 20px; padding: 16px 20px; background: #21262d; border: 1px solid #30363d; border-radius: 10px; text-align: left; }
+  .hlavicka { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .jmeno { font-size: 1.3em; font-weight: 600; }
+  .spojeni { color: #f85149; font-size: .9em; }
+  .spojeni.ok { color: #3fb950; }
+
+  /* dráha = LED pás tyče */
+  .draha { position: relative; height: 34px; margin: 16px 0; background: #0d1117; border: 2px solid #30363d; border-radius: 17px; overflow: hidden; }
+  .cil { position: absolute; top: 0; bottom: 0; width: calc(10 / 64 * 100%); background: #e3b341; opacity: .6; transition: left .3s; }
+  .kulicka, .souper { position: absolute; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); transition: left .06s linear; }
+  .kulicka { width: 26px; height: 26px; background: #f85149; box-shadow: 0 0 12px #f85149; z-index: 2; }
+  .souper { width: 14px; height: 14px; background: #58a6ff; box-shadow: 0 0 8px #58a6ff; opacity: .8; z-index: 1; }
+  .vyhra .draha { animation: blikZelene .6s steps(1) infinite; }
+  .prohra .draha { animation: blikCervene .6s steps(1) infinite; }
+  @keyframes blikZelene { 50% { background: #2ea043; } }
+  @keyframes blikCervene { 50% { background: #da3633; } }
+
+  .skore { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .bod { width: 18px; height: 18px; border-radius: 50%; background: #30363d; }
+  .bod.ok { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+  .cislo { margin-left: 8px; color: #8b949e; }
+
+  .legenda { color: #8b949e; font-size: .9em; margin: 8px 0 16px; }
+  .legenda span { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 12px; }
+  .tlacitka { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .legenda a { color: #58a6ff; }
+  #solo { background: #1f6feb; }
+  #solo:hover { background: #388bfd; }
+  button { font: inherit; padding: 10px 24px; background: #238636; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+  button:hover { background: #2ea043; }
+</style>
+</head>
+<body>
+  <h1>Rehabilitační pomůcka</h1>
+  <p id="stav">Připojuji se k serveru…</p>
+
+  <section class="hrac">
+    <div class="hlavicka"><span class="jmeno">Tyč 1</span><span class="spojeni">odpojeno</span></div>
+    <div class="draha"><div class="cil"></div><div class="souper"></div><div class="kulicka"></div></div>
+    <div class="skore"></div>
+  </section>
+  <section class="hrac">
+    <div class="hlavicka"><span class="jmeno">Tyč 2</span><span class="spojeni">odpojeno</span></div>
+    <div class="draha"><div class="cil"></div><div class="souper"></div><div class="kulicka"></div></div>
+    <div class="skore"></div>
+  </section>
+
+  <p class="legenda">
+    <span style="background:#f85149"></span>hráč
+    <span style="background:#58a6ff"></span>soupeř
+    <span style="background:#e3b341"></span>cíl
+  </p>
+  <div class="tlacitka">
+    <button id="solo" hidden>Spustit sólo hru</button>
+    <button id="novaHra">Nová hra</button>
+  </div>
+  <p class="legenda">Test bez hardwaru: <a href="/tyc" target="_blank">obě virtuální tyče</a> ·
+    <a href="/tyc?id=tyc2" target="_blank">jen virtuální tyč 2</a> (hra proti skutečné tyči 1)</p>
+
+<script>
+  const LED = 64, VITEZ = 10;
+  const room = new URLSearchParams(location.search).get('room') || 'rehab';
+  const karty = [...document.querySelectorAll('.hrac')];
+  const stav = document.getElementById('stav');
+  const nazev = id => id.replace(/^tyc(\d+)$/, 'Tyč $1');
+  const naProcenta = led => ((led + 0.5) / LED * 100) + '%';
+
+  // 10 teček pro skóre
+  for (const k of karty) {
+    const s = k.querySelector('.skore');
+    for (let i = 0; i < VITEZ; i++) s.insertAdjacentHTML('beforeend', '<span class="bod"></span>');
+    s.insertAdjacentHTML('beforeend', '<span class="cislo">0 / ' + VITEZ + '</span>');
+  }
+
+  function vykresli(m) {
+    const hraci = m.players.slice().sort((a, b) => a.id.localeCompare(b.id));
+    const vitez = hraci.find(p => p.winner);
+    const pripojeno = hraci.filter(p => p.connected).length;
+    stav.className = m.state === 'finished' ? 'konec' : '';
+    if (m.state === 'waiting') stav.textContent = pripojeno === 1
+      ? 'Připojená je jedna tyč – čeká se na druhou, nebo spusť sólo hru'
+      : 'Čeká se na připojení tyčí…';
+    else if (m.state === 'playing') stav.textContent = m.solo
+      ? 'Sólo hra – splň ' + VITEZ + ' úkolů'
+      : 'Hraje se – kdo první splní ' + VITEZ + ' úkolů, vyhrává';
+    else stav.textContent = !vitez ? 'Konec hry' : m.solo
+      ? 'Hotovo! ' + nazev(vitez.id) + ' splnila ' + VITEZ + ' úkolů'
+      : 'Vyhrála ' + nazev(vitez.id) + '!';
+
+    // sólo jen když je připojená právě jedna tyč a nic neběží – jakmile se připojí druhá, tlačítko zmizí
+    document.getElementById('solo').hidden = !(m.state === 'waiting' && pripojeno === 1);
+    karty[1].hidden = m.solo;
+
+    karty.forEach((k, i) => {
+      const p = hraci[i], souper = hraci[1 - i];
+      const spojeni = k.querySelector('.spojeni');
+      k.querySelector('.jmeno').textContent = p ? nazev(p.id) : 'Čeká se na tyč…';
+      spojeni.textContent = p && p.connected ? 'připojeno' : 'odpojeno';
+      spojeni.classList.toggle('ok', !!(p && p.connected));
+
+      const kulicka = k.querySelector('.kulicka');
+      kulicka.hidden = !p || p.pos == null;
+      if (!kulicka.hidden) kulicka.style.left = naProcenta(p.pos);
+      kulicka.style.opacity = p && p.connected ? 1 : .3;
+
+      const s = k.querySelector('.souper');
+      s.hidden = !souper || !souper.connected || souper.pos == null;
+      if (!s.hidden) s.style.left = naProcenta(souper.pos);
+
+      const cil = k.querySelector('.cil');
+      cil.hidden = m.state !== 'playing' || !p || p.cil == null;
+      if (!cil.hidden) cil.style.left = (p.cil / LED * 100) + '%';
+
+      const body = p ? p.score : 0;
+      k.querySelectorAll('.bod').forEach((b, j) => b.classList.toggle('ok', j < body));
+      k.querySelector('.cislo').textContent = body + ' / ' + VITEZ;
+      k.classList.toggle('vyhra', m.state === 'finished' && !!p && p.winner);
+      k.classList.toggle('prohra', m.state === 'finished' && !!p && !p.winner);
+    });
+  }
+
+  function pripoj() {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'join', role: 'viewer', room }));
+    ws.onmessage = e => { const m = JSON.parse(e.data); if (m.type === 'monitor') vykresli(m); };
+    ws.onclose = () => {
+      stav.className = '';
+      stav.textContent = 'Spojení se serverem přerušeno, zkouším znovu…';
+      setTimeout(pripoj, 1000);
+    };
+  }
+
+  document.getElementById('solo').onclick = () =>
+    fetch('/api/rooms/' + encodeURIComponent(room) + '/solo', { method: 'POST' });
+  document.getElementById('novaHra').onclick = () =>
+    fetch('/api/rooms/' + encodeURIComponent(room) + '/reset', { method: 'POST' });
+
+  pripoj();
+</script>
+</body>
+</html>

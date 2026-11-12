@@ -1,0 +1,6 @@
+Program píše náhodný úhel(jakoby od 0-360).Člověk to musí otočit na ten počet stupňů který byl uveden.
+Ale bude mít 10 sekund na přemýšlení, a jenom 3 na výsledek.
+Program vyčká 10 sekund po uvedení stupně, a až potom zahoří černveně, což bude znamenat, že hra začala.
+Člověk to otočí a po 3 sekundách program zahoří(muže li to mít různou barvu?): červeným-jste 
+úplně jinde(rozsah 20 a víc), modrý-jste blízko (20-5), zelený- jste tam(5-0). 
+A může se to opakovat

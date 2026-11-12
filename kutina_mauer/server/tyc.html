@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtuální tyče</title>
+<!-- Testovací náhrada skutečných tyčí: obě tyče posílají serveru stejné zprávy jako tyc1.ino / tyc2.ino. -->
+<style>
+  body { font-family: "Segoe UI", sans-serif; background: #181818; color: #eee; margin: 0; padding: 20px 16px; text-align: center; }
+  h1 { margin: 0 0 4px; }
+  .podnadpis { color: #8b949e; margin: 0 0 20px; }
+  a { color: #58a6ff; }
+  .tyce { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 20px; max-width: 1300px; margin: 0 auto; }
+  .karta { background: #21262d; border: 1px solid #30363d; border-radius: 10px; padding: 16px 20px; text-align: left; }
+  .hlavicka { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .jmeno { font-size: 1.3em; font-weight: 600; }
+  .spojeni { color: #f85149; font-size: .9em; }
+  .spojeni.ok { color: #3fb950; }
+  .stav { color: #8b949e; min-height: 1.4em; margin: 6px 0 0; }
+  .stav.konec { color: #e3b341; font-weight: 600; }
+
+  /* scéna s nakloněnou tyčí */
+  .scena { position: relative; aspect-ratio: 16 / 9; margin: 10px 0; background: radial-gradient(ellipse at center, #1f252d, #13171c 75%); border-radius: 8px; overflow: hidden; cursor: grab; touch-action: none; user-select: none; }
+  .scena:active { cursor: grabbing; }
+  .horizont { position: absolute; left: 3%; right: 3%; top: 50%; border-top: 1px dashed #30363d; }
+  .naklon { position: absolute; left: 50%; top: 50%; width: 88%; transform: translate(-50%, -50%); perspective: 800px; }
+  .tyc { padding: 6px 8px; background: linear-gradient(#6e7681, #2d333b); border-radius: 6px; box-shadow: 0 8px 18px #000a; transition: transform .5s; }
+  .tyc.otocena { transform: rotateX(180deg); }
+  .pas { display: flex; gap: 1px; padding: 3px; background: #0d1117; border-radius: 3px; }
+  .pas div { flex: 1; height: 14px; border-radius: 2px; background: #161b22; }
+  .prekryv { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; background: #0d1117e6; text-align: center; cursor: default; }
+  .prekryv button { background: #1f6feb; border-color: #388bfd; }
+
+  .info { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .info b { color: #58a6ff; }
+  .cidla { color: #8b949e; font-size: .85em; font-variant-numeric: tabular-nums; }
+  .tlacitka { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  button { font: inherit; padding: 8px 16px; background: #30363d; color: #fff; border: 1px solid #484f58; border-radius: 6px; cursor: pointer; }
+  button:hover { background: #3b434b; }
+  button.zapnuto { background: #9e6a03; border-color: #d29922; }
+  .napoveda { color: #8b949e; font-size: .85em; margin: 12px 0 0; }
+  kbd { background: #30363d; border: 1px solid #484f58; border-radius: 4px; padding: 0 5px; font-family: inherit; }
+</style>
+</head>
+<body>
+  <h1>Virtuální tyče</h1>
+  <p class="podnadpis">Test bez hardwaru · <a href="/" target="_blank">otevřít monitor</a></p>
+  <div class="tyce"><section class="karta" id="karta1"></section><section class="karta" id="karta2"></section></div>
+
+<script>
+  // stejné hodnoty a logika jako v tyc1.ino
+  const LED = 64, SIRKA_CILE = 10, VITEZ = 10, DOBA_V_CILI = 1500, DOBA_OTOCENI = 3000;
+  const MAX_UHEL = 35, RYCHLOST_KLAVES = 40;   // ° a °/s
+  const ROOM = new URLSearchParams(location.search).get('room') || 'rehab';
+  const nazev = id => id.replace(/^tyc(\d+)$/, 'Tyč $1');
+  const omez = (v, min, max) => Math.max(min, Math.min(max, v));
+  const mapFloat = (val, inMin, inMax, outMin, outMax) => (val - inMin) * (outMax - outMin) / (inMax - inMin) + outMin;
+
+  function virtualniTyc(ID, karta, klavesy) {
+    karta.innerHTML = `
+      <div class="hlavicka"><span class="jmeno">${nazev(ID)}</span><span class="spojeni">odpojeno</span></div>
+      <p class="stav"></p>
+      <div class="scena"><div class="horizont"></div><div class="naklon"><div class="tyc"><div class="pas"></div></div></div>
+        <div class="prekryv" hidden><span>Tuhle tyč teď ovládá jiné okno nebo skutečná tyč.</span><button class="prevzit">Převzít ovládání</button></div></div>
+      <div class="info"><span>Skóre <b class="skore"></b> · soupeř <b class="souperSkore"></b></span><span class="cidla"></span></div>
+      <div class="tlacitka"><button class="otocit">Otočit tyč</button><button class="odpojit">Simulovat výpadek</button></div>
+      <p class="napoveda">Nakláněj tažením myší, nebo <kbd>${klavesy.popisVlevo}</kbd> <kbd>${klavesy.popisVpravo}</kbd> · otočení <kbd>${klavesy.popisOtocit}</kbd></p>`;
+    const el = s => karta.querySelector(s);
+    for (let i = 0; i < LED; i++) el('.pas').append(document.createElement('div'));
+    const diody = [...el('.pas').children];
+
+    let ws = null, odpojenoRucne = false, vytlacena = false, plno = false;
+    let stav = 'waiting', solo = false, vyhral = false, skore = 0, souperSkore = 0, epocha = -1;
+    let uhel = 0, x = 0, pozice = 32, cil = 0, souper = -1, vCiliOd = 0;
+    let otocena = false, otocenaOd = 0, rezimSkore = false;
+    let odeslano = '', posledniOdeslani = 0;
+
+    function novyCil() {
+      do { cil = Math.floor(Math.random() * (LED - SIRKA_CILE + 1)); } while (pozice >= cil && pozice < cil + SIRKA_CILE);
+      vCiliOd = 0;
+    }
+    novyCil();
+
+    // ---------- komunikace se serverem ----------
+    function posli(o) {
+      if (!ws || ws.readyState !== 1) return false;
+      ws.send(JSON.stringify(o));
+      return true;
+    }
+    const posliSkore = () => posli({ type: 'score', score: skore, epoch: epocha });
+
+    function pripoj() {
+      if (odpojenoRucne || vytlacena) return;
+      const s = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+      ws = s;
+      s.onopen = () => { odeslano = ''; posli({ type: 'join', room: ROOM, id: ID }); };
+      s.onmessage = e => zpracuj(JSON.parse(e.data));
+      s.onclose = () => {
+        if (ws !== s) return;
+        ws = null; souper = -1;
+        setTimeout(pripoj, 2000);
+      };
+    }
+
+    function zpracuj(m) {
+      if (m.type === 'opp') {
+        souper = m.pos;
+      } else if (m.type === 'status') {
+        plno = false;
+        stav = m.state;
+        solo = m.solo === true;
+        vyhral = m.won === true;
+        souperSkore = m.opp;
+        if (!m.oppConnected) souper = -1;
+        if (m.epoch !== epocha) {
+          if (epocha !== -1) { skore = 0; novyCil(); }   // server spustil novou hru
+          epocha = m.epoch;
+        }
+        if (m.you > skore) skore = m.you;
+        if (skore > m.you && stav === 'playing') posliSkore();   // body získané během výpadku
+      } else if (m.type === 'full') {
+        plno = true;
+      } else if (m.type === 'kicked') {
+        vytlacena = true;   // stejnou tyč převzalo jiné okno nebo skutečná tyč – nepřipojovat se zpět, ať se nepřetahují
+      }
+    }
+    el('.prevzit').onclick = () => { vytlacena = false; pripoj(); };
+
+    // ---------- ovládání ----------
+    function prepniOtoceni() {
+      otocena = !otocena;
+      el('.otocit').classList.toggle('zapnuto', otocena);
+      el('.otocit').textContent = otocena ? 'Vrátit tyč zpět' : 'Otočit tyč';
+    }
+    el('.otocit').onclick = prepniOtoceni;
+    el('.odpojit').onclick = () => {
+      odpojenoRucne = !odpojenoRucne;
+      el('.odpojit').classList.toggle('zapnuto', odpojenoRucne);
+      el('.odpojit').textContent = odpojenoRucne ? 'Znovu připojit' : 'Simulovat výpadek';
+      if (odpojenoRucne) { const s = ws; ws = null; souper = -1; if (s) s.close(); }
+      else pripoj();
+    };
+
+    // tažení myší: tyč míří ke kurzoru (funguje za levý i pravý konec)
+    const scena = el('.scena');
+    function zMysi(e) {
+      const r = scena.getBoundingClientRect();
+      let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+      if (dx < 0) { dx = -dx; dy = -dy; }
+      if (dx > 15) uhel = omez(Math.atan2(dy, dx) * 180 / Math.PI, -MAX_UHEL, MAX_UHEL);
+    }
+    scena.onpointerdown = e => { if (e.target.closest('.prekryv')) return; scena.setPointerCapture(e.pointerId); zMysi(e); };
+    scena.onpointermove = e => { if (e.buttons) zMysi(e); };
+
+    // ---------- herní smyčka (jako loop() v .ino) ----------
+    function tick(ted, dt) {
+      if (drzene.has(klavesy.vlevo)) uhel -= RYCHLOST_KLAVES * dt;
+      if (drzene.has(klavesy.vpravo)) uhel += RYCHLOST_KLAVES * dt;
+      uhel = omez(uhel, -MAX_UHEL, MAX_UHEL);
+
+      // akcelerometr: složka gravitace v ose tyče, pak stejný převod na LED jako v .ino
+      x = Math.sin(uhel * Math.PI / 180);
+      pozice = omez(Math.floor(mapFloat(x, -0.5, 0.5, 0, LED - 1)), 0, LED - 1);
+
+      // otočení 3 s => režim skóre, po konci hry => nová hra, při čekání na soupeře => sólo hra
+      if (!otocena) { otocenaOd = 0; rezimSkore = false; }
+      else {
+        if (!otocenaOd) otocenaOd = ted;
+        if (ted - otocenaOd >= DOBA_OTOCENI) {
+          if (stav === 'finished') { posli({ type: 'rematch' }); otocenaOd = ted; }
+          else if (stav === 'waiting') { posli({ type: 'solo' }); otocenaOd = ted; }
+          else rezimSkore = true;
+        }
+      }
+
+      if (stav === 'playing' && !rezimSkore && !vytlacena && skore < VITEZ) {
+        if (pozice >= cil && pozice < cil + SIRKA_CILE) {
+          if (!vCiliOd) vCiliOd = ted;
+          if (ted - vCiliOd >= DOBA_V_CILI) { skore++; posliSkore(); novyCil(); }
+        } else vCiliOd = 0;
+      }
+
+      // poloha max. 20× za sekundu a jen při změně
+      const zprava = pozice + ',' + cil;
+      if (zprava !== odeslano && ted - posledniOdeslani >= 50 && posli({ type: 'pos', pos: pozice, cil })) {
+        odeslano = zprava;
+        posledniOdeslani = ted;
+      }
+      vykresli(ted);
+    }
+
+    function vykresli(ted) {
+      const blik = Math.floor(ted / 300) % 2;
+      diody.forEach((d, i) => {
+        let barva = '';
+        if (stav === 'finished') { if (blik) barva = vyhral ? '#3fb950' : '#f85149'; }
+        else if (rezimSkore) { if (i < skore) barva = '#e6edf3'; }
+        else if (i === pozice) barva = '#f85149';
+        else if (i === souper) barva = '#58a6ff';
+        else if (stav === 'playing' && i >= cil && i < cil + SIRKA_CILE) barva = '#e3b341';
+        d.style.background = barva;
+        d.style.boxShadow = barva ? '0 0 6px ' + barva : '';
+      });
+      el('.naklon').style.transform = `translate(-50%, -50%) rotate(${uhel}deg)`;
+      el('.tyc').classList.toggle('otocena', otocena);
+
+      const online = !!ws && ws.readyState === 1;
+      el('.spojeni').textContent = online ? 'připojeno' : 'odpojeno';
+      el('.spojeni').classList.toggle('ok', online);
+      el('.skore').textContent = skore + ' / ' + VITEZ;
+      el('.souperSkore').textContent = solo ? 'žádný (sólo)' : souperSkore + ' / ' + VITEZ;
+      el('.prekryv').hidden = !vytlacena;
+      el('.cidla').textContent = `náklon ${uhel.toFixed(0)}° · x = ${x.toFixed(2)} g · LED ${pozice}`
+        + (vCiliOd ? ` · v cíli ${((ted - vCiliOd) / 1000).toFixed(1)} s` : '');
+
+      let text;
+      if (vytlacena) text = 'Odpojeno – tuhle tyč ovládá jiné okno nebo skutečná tyč';
+      else if (plno) text = 'Místnost je plná – už jsou připojené dvě jiné tyče';
+      else if (stav === 'finished') text = (solo ? 'Hotovo – splnil jsi ' + VITEZ + ' úkolů!' : vyhral ? 'Vyhrál jsi!' : 'Prohrál jsi.') + ' Nová hra: otoč tyč na 3 s';
+      else if (otocena && !rezimSkore) text = 'Drž otočenou… ' + ((ted - otocenaOd) / 1000).toFixed(1) + ' / 3 s';
+      else if (rezimSkore) text = 'Režim skóre – svítí ' + skore + ' diod';
+      else if (stav === 'playing') text = (solo ? 'Sólo hra' : 'Hraje se') + ' – udrž červenou diodu 1,5 s ve žlutém pásu';
+      else text = 'Čekám na soupeře – nebo otoč tyč na 3 s a hraj sólo';
+      if (!online && !vytlacena) text = (odpojenoRucne ? 'Výpadek (simulovaný)' : 'Nepřipojeno k serveru') + ' – hraješ offline · ' + text;
+      el('.stav').textContent = text;
+      el('.stav').classList.toggle('konec', stav === 'finished');
+    }
+
+    pripoj();
+    return { klavesy, tick, prepniOtoceni };
+  }
+
+  // ---------- klávesnice ----------
+  // /tyc = obě tyče, /tyc?id=tyc2 = jen tyč 2 (např. proti skutečné tyči 1)
+  const drzene = new Set();
+  const jen = new URLSearchParams(location.search).get('id');
+  const tyce = [];
+  if (jen !== 'tyc2') tyce.push(virtualniTyc('tyc1', document.getElementById('karta1'),
+    { vlevo: 'KeyA', vpravo: 'KeyD', otocit: 'KeyW', popisVlevo: 'A', popisVpravo: 'D', popisOtocit: 'W' }));
+  else document.getElementById('karta1').remove();
+  if (jen !== 'tyc1') tyce.push(virtualniTyc('tyc2', document.getElementById('karta2'),
+    { vlevo: 'ArrowLeft', vpravo: 'ArrowRight', otocit: 'ArrowUp', popisVlevo: '←', popisVpravo: '→', popisOtocit: '↑' }));
+  else document.getElementById('karta2').remove();
+  addEventListener('keydown', e => {
+    if (e.code.startsWith('Arrow')) e.preventDefault();
+    if (!e.repeat) for (const t of tyce) if (e.code === t.klavesy.otocit) t.prepniOtoceni();
+    drzene.add(e.code);
+  });
+  addEventListener('keyup', e => drzene.delete(e.code));
+  addEventListener('blur', () => drzene.clear());
+
+  let posledni = Date.now();
+  setInterval(() => {
+    const ted = Date.now(), dt = (ted - posledni) / 1000;
+    posledni = ted;
+    for (const t of tyce) t.tick(ted, dt);
+  }, 20);
+</script>
+</body>
+</html>

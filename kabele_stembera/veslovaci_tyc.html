@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veslařská tyč – živá data</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --text: #1b2430; --muted: #6b7785;
+    --line: #dde3ea; --accent: #1f7ae0; --good: #2ea44f; --bad: #d93a3a;
+    --led-off: #e3e8ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12171d; --card: #1b222b; --text: #e7ecf2; --muted: #93a0ae;
+      --line: #2c3743; --accent: #5aa2ff; --good: #3fb860; --bad: #f06060;
+      --led-off: #2a333d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); padding: 16px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 14px 16px; margin-bottom: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  select, input, button { font: inherit; padding: 8px 10px; border-radius: 8px;
+          border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button { cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.secondary { background: transparent; color: var(--text); border-color: var(--line); }
+  .status { margin-left: auto; font-size: .9rem; color: var(--muted); }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+         background: var(--bad); margin-right: 6px; }
+  .dot.on { background: var(--good); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+  .big { font-size: 2.6rem; font-weight: 700; line-height: 1.1; }
+  .label { color: var(--muted); font-size: .85rem; }
+  .unit { font-size: 1rem; color: var(--muted); font-weight: 400; }
+  .bar { height: 12px; border-radius: 6px; background: var(--led-off); overflow: hidden; margin-top: 8px; }
+  .bar > div { height: 100%; width: 0; background: var(--good); transition: width .2s; }
+  #leds { display: flex; gap: 3px; margin-top: 8px; }
+  #leds span { flex: 1; height: 22px; border-radius: 4px; background: var(--led-off); transition: background .15s; }
+  canvas { width: 100%; height: 220px; display: block; }
+  pre { margin: 0; font-size: .85rem; overflow-x: auto; color: var(--muted); }
+  .hint { color: var(--muted); font-size: .85rem; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Veslařská tyč – živá data</h1>
+
+  <div class="card">
+    <div class="row">
+      <label>Zdroj dat:
+        <select id="mode">
+          <option value="demo">Demo (simulace)</option>
+          <option value="wifi">WiFi (ESP32)</option>
+          <option value="usb">USB (Web Serial)</option>
+        </select>
+      </label>
+      <input id="ip" placeholder="IP adresa ESP32, např. 192.168.1.50" size="30" hidden>
+      <button id="connect">Připojit</button>
+      <button id="reset" class="secondary">Vynulovat záběry</button>
+      <span class="status"><span class="dot" id="dot"></span><span id="statusText">odpojeno</span></span>
+    </div>
+    <div class="hint" id="hint"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Počet záběrů</div>
+      <div class="big" id="strokes">0</div></div>
+    <div class="card"><div class="label">Tempo</div>
+      <div class="big"><span id="spm">0.0</span> <span class="unit">záb/min</span></div>
+      <div class="label">cíl: <span id="target">22</span> záb/min</div></div>
+    <div class="card"><div class="label">Úhel tyče</div>
+      <div class="big"><span id="angle">0.0</span><span class="unit"> °</span></div></div>
+    <div class="card"><div class="label">Kvalita tempa</div>
+      <div class="big"><span id="scorePct">0</span><span class="unit"> %</span></div>
+      <div class="bar"><div id="scoreBar"></div></div></div>
+  </div>
+
+  <div class="card">
+    <div class="label">LED na tyči (náhled)</div>
+    <div id="leds"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Úhel tyče v čase (posledních ~30 s)</div>
+    <canvas id="chartAngle"></canvas>
+  </div>
+  <div class="card">
+    <div class="label">Tempo v čase (záb/min)</div>
+    <canvas id="chartSpm"></canvas>
+  </div>
+
+  <div class="card">
+    <div class="label">Poslední přijaté JSON</div>
+    <pre id="raw">–</pre>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const MAX_POINTS = 300;
+const hist = { angle: [], spm: [] };
+let timer = null, port = null, reader = null, running = false;
+
+/* ---------- UI ---------- */
+function setStatus(on, text) {
+  $('dot').classList.toggle('on', on);
+  $('statusText').textContent = text;
+}
+
+function buildLeds(n) {
+  const box = $('leds');
+  if (box.children.length === n) return;
+  box.innerHTML = '';
+  for (let i = 0; i < n; i++) box.appendChild(document.createElement('span'));
+}
+
+function ledColor(i, n) {
+  const p = i / (n - 1);
+  return `rgb(${Math.round(255 * (1 - p))},${Math.round(255 * p)},0)`;
+}
+
+/* ---------- Zpracování JSON ---------- */
+function handleData(d) {
+  if (typeof d !== 'object' || d === null || d.angle === undefined) return; // ignoruj {"info":..}
+  $('raw').textContent = JSON.stringify(d, null, 2);
+  $('strokes').textContent = d.strokes;
+  $('spm').textContent = Number(d.spm).toFixed(1);
+  $('target').textContent = d.target;
+  $('angle').textContent = Number(d.angle).toFixed(1);
+  const pct = Math.round(d.score * 100);
+  $('scorePct').textContent = pct;
+  $('scoreBar').style.width = pct + '%';
+
+  const n = d.numLeds || 30;
+  buildLeds(n);
+  [...$('leds').children].forEach((el, i) => {
+    el.style.background = i < d.leds ? ledColor(i, n) : '';
+  });
+
+  hist.angle.push(d.angle); hist.spm.push(d.spm);
+  if (hist.angle.length > MAX_POINTS) { hist.angle.shift(); hist.spm.shift(); }
+  drawChart($('chartAngle'), hist.angle, -45, 45, 0);
+  drawChart($('chartSpm'), hist.spm, 0, 40, +d.target);
+}
+
+/* ---------- Graf ---------- */
+function drawChart(cv, data, min, max, refLine) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  const line = css.getPropertyValue('--line'), accent = css.getPropertyValue('--accent'),
+        muted = css.getPropertyValue('--muted');
+  const y = v => h - 18 - (Math.min(max, Math.max(min, v)) - min) / (max - min) * (h - 26);
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = line; ctx.fillStyle = muted; ctx.font = '11px system-ui'; ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const v = min + (max - min) * k / 4, yy = y(v);
+    ctx.beginPath(); ctx.moveTo(34, yy); ctx.lineTo(w, yy); ctx.stroke();
+    ctx.fillText(v.toFixed(0), 2, yy + 4);
+  }
+  if (refLine) {
+    ctx.setLineDash([5, 4]); ctx.strokeStyle = muted;
+    ctx.beginPath(); ctx.moveTo(34, y(refLine)); ctx.lineTo(w, y(refLine)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (data.length < 2) return;
+  ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.beginPath();
+  data.forEach((v, i) => {
+    const x = 34 + i / (MAX_POINTS - 1) * (w - 34);
+    i ? ctx.lineTo(x, y(v)) : ctx.moveTo(x, y(v));
+  });
+  ctx.stroke();
+}
+
+/* ---------- Režim DEMO ---------- */
+function startDemo() {
+  let t = 0, strokes = 0, lastPhase = 0, leds = 0;
+  timer = setInterval(() => {
+    t += 0.1;
+    const spm = 22 + 6 * Math.sin(t / 12);
+    const phase = (t * spm / 60) % 1;
+    if (phase < lastPhase) strokes++;
+    lastPhase = phase;
+    const angle = 28 * Math.sin(phase * 2 * Math.PI - Math.PI / 2);
+    const score = Math.max(0, Math.min(1, 1 - Math.abs(spm - 22) / 10));
+    leds += (score * 30 - leds) * 0.1;
+    handleData({ t: Math.round(t * 1000), angle: +angle.toFixed(1), strokes,
+      spm: +spm.toFixed(1), target: 22, score: +score.toFixed(2),
+      leds: Math.round(leds), numLeds: 30 });
+  }, 100);
+  setStatus(true, 'demo běží');
+}
+
+/* ---------- Režim WiFi (ESP32) ---------- */
+function startWifi() {
+  const ip = $('ip').value.trim();
+  if (!ip) { setStatus(false, 'zadej IP adresu'); return; }
+  let fails = 0;
+  timer = setInterval(async () => {
+    try {
+      const r = await fetch(`http://${ip}/data`, { cache: 'no-store' });
+      handleData(await r.json());
+      fails = 0; setStatus(true, 'připojeno (WiFi)');
+    } catch (e) {
+      if (++fails > 3) setStatus(false, 'ESP32 neodpovídá');
+    }
+  }, 200);
+}
+
+/* ---------- Režim USB (Web Serial) ---------- */
+async function startUsb() {
+  if (!('serial' in navigator)) { setStatus(false, 'prohlížeč nepodporuje Web Serial (použij Chrome/Edge)'); return; }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (e) { setStatus(false, 'port nebyl otevřen'); return; }
+  setStatus(true, 'připojeno (USB)');
+  running = true;
+  const decoder = new TextDecoderStream();
+  port.readable.pipeTo(decoder.writable);
+  reader = decoder.readable.getReader();
+  let buf = '';
+  while (running) {
+    try {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
+        if (!line) continue;
+        try { handleData(JSON.parse(line)); } catch (e) { /* neúplný řádek */ }
+      }
+    } catch (e) { break; }
+  }
+  setStatus(false, 'odpojeno');
+}
+
+/* ---------- Ovládání ---------- */
+async function stopAll() {
+  clearInterval(timer); timer = null; running = false;
+  try { if (reader) await reader.cancel(); } catch (e) {}
+  try { if (port) await port.close(); } catch (e) {}
+  reader = null; port = null;
+  setStatus(false, 'odpojeno');
+}
+
+const hints = {
+  demo: 'Simulovaná data bez hardwaru – na vyzkoušení vzhledu stránky.',
+  wifi: 'ESP32 a počítač musí být ve stejné síti. Stránku otevři jako soubor (nebo přes http://), ne přes https://.',
+  usb:  'Zapoj desku přes USB, zavři Serial Monitor v Arduino IDE a vyber port. Funguje v Chrome / Edge.'
+};
+function updateMode() {
+  const m = $('mode').value;
+  $('ip').hidden = m !== 'wifi';
+  $('hint').textContent = hints[m];
+}
+$('mode').addEventListener('change', updateMode);
+$('connect').addEventListener('click', async () => {
+  await stopAll();
+  const m = $('mode').value;
+  if (m === 'demo') startDemo();
+  else if (m === 'wifi') startWifi();
+  else startUsb();
+});
+$('reset').addEventListener('click', async () => {
+  hist.angle.length = 0; hist.spm.length = 0;
+  if ($('mode').value === 'wifi' && $('ip').value.trim()) {
+    try { await fetch(`http://${$('ip').value.trim()}/reset`); } catch (e) {}
+  }
+});
+window.addEventListener('resize', () => {
+  drawChart($('chartAngle'), hist.angle, -45, 45, 0);
+  drawChart($('chartSpm'), hist.spm, 0, 40, +$('target').textContent);
+});
+
+buildLeds(30);
+updateMode();
+</script>
+</body>
+</html>

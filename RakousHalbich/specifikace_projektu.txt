@@ -1,0 +1,5 @@
+1D ping pong 
+Kulička jede od Pacienta A k Pacientovi B. Pacient B mírně švihne tyčí a tím odpálí kuličku k pacientovi A.
+Když kulička vyjede z tyče, hra končí.
+Cílem je společně dosáhnout co nejvyššího počtu přihrávek. Trénuje se komunikace, synchronizace a vzájemná spolupráce.
+Konečné skóre se uloží do počítače
