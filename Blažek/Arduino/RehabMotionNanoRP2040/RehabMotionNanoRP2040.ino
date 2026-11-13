@@ -1,3 +1,103 @@
+/*
+  REHAB MOTION LAB
+  Hardware: Arduino Nano RP2040 Connect
+  Default IMU: built-in LSM6DSOX (accelerometer + gyroscope)
+  Optional: external MPU6050, selected by USE_EXTERNAL_MPU6050 = 1
+  LED strip: 64 x WS2812B / NeoPixel
+  Network: WiFiNINA Access Point + HTTP web server
+
+  Open http://192.168.4.1 after connecting to Wi-Fi:
+    SSID: RehabMotion
+    Password: Rehab2026
+
+  Libraries (Arduino IDE Library Manager):
+    - WiFiNINA
+    - Arduino_LSM6DSOX
+    - NeoPixelConnect (recommended for Nano RP2040 Connect)
+    - Adafruit MPU6050 + Adafruit Unified Sensor (only if USE_EXTERNAL_MPU6050 = 1)
+
+  Board package:
+    Arduino Mbed OS Nano Boards
+    Board: Arduino Nano RP2040 Connect
+
+  SAFETY:
+    - Power the 5V LED strip from a separate regulated 5V supply.
+    - Connect the LED supply GND and Arduino GND together.
+    - Do NOT power the 64 LEDs from the Nano board.
+    - Use a 3.3V -> 5V logic-level shifter for the WS2812B data line.
+    - Fit a 330-470 ohm series resistor at the data input and a 1000uF
+      capacitor across the LED strip's 5V/GND input.
+*/
+
+#include <SPI.h>
+#include <WiFiNINA.h>
+#define USE_EXTERNAL_MPU6050 0
+
+#if USE_EXTERNAL_MPU6050
+  #include <Wire.h>
+  #include <Adafruit_MPU6050.h>
+  #include <Adafruit_Sensor.h>
+  Adafruit_MPU6050 externalMPU;
+  const char SENSOR_NAME[] = "MPU6050";
+#else
+  #include <Arduino_LSM6DSOX.h>
+  const char SENSOR_NAME[] = "LSM6DSOX";
+#endif
+
+#include <NeoPixelConnect.h>
+#include <math.h>
+#include <string.h>
+
+// -----------------------------------------------------------------------------
+// USER CONFIGURATION
+// -----------------------------------------------------------------------------
+
+const char AP_SSID[] = "RehabMotion";
+const char AP_PASSWORD[] = "Rehab2026"; // WPA2 password must be at least 8 chars
+const uint8_t AP_CHANNEL = 6;
+
+const uint8_t LED_GPIO = 18;            // Physical header D6 maps to RP2040 GPIO18
+const uint16_t LED_COUNT = 64;
+
+// Sensor orientation:
+// This firmware measures roll around the sensor's X axis:
+// accelerometer angle = atan2(Y, Z), gyroscope rate = gyro X.
+// If your mechanical mounting uses the other axis, tell me how the board is
+// placed and I can adapt the formula. If direction is reversed, set -1.0f.
+const float SENSOR_SIGN = 1.0f;
+const float FILTER_ALPHA = 0.985f;
+const float RAD_TO_DEG_F = 57.2957795f;
+
+// The box covers physical LEDs 28-36 (1-based positions).
+// Left visible LEDs are 1-27; right visible LEDs are 37-64.
+const int16_t LEFT_EDGE_INDEX = 26;    // 0-based LED 27
+const int16_t RIGHT_EDGE_INDEX = 36;   // 0-based LED 37
+
+int targetAngleDeg = 25;               // Editable by the web application: 5..60
+uint32_t holdDurationMs = 3000;        // Editable by the web application: 500..15000
+
+// -----------------------------------------------------------------------------
+// GLOBAL OBJECTS AND STATE
+// -----------------------------------------------------------------------------
+
+WiFiServer server(80);
+// NeoPixelConnect uses RP2040 GPIO numbers (not Arduino D-pin numbers).
+NeoPixelConnect strip(LED_GPIO, LED_COUNT);
+
+bool wifiReady = false;
+bool sensorReady = false;
+bool filterInitialized = false;
+float neutralAngleDeg = 0.0f;
+float filteredAngleDeg = 0.0f;
+float rawAx = 0.0f, rawAy = 0.0f, rawAz = 1.0f;
+float rawGx = 0.0f, rawGy = 0.0f, rawGz = 0.0f;
+uint32_t lastImuMicros = 0;
+uint32_t lastImuMillis = 0;
+uint32_t lastLedUpdateMs = 0;
+uint32_t lastWifiRetryMs = 0;
+uint32_t sampleCounter = 0;
+
+const char INDEX_HTML[] = R"HTMLPAGE(
 <!DOCTYPE html>
 <html lang="cs">
 <head>
@@ -118,8 +218,8 @@
     els.connectionText.textContent = message;
     const sensorAvailable = (sensorOk === undefined) ? networkOk : sensorOk;
     els.sensorPill.textContent = sensorAvailable ? 'Senzor: ' + (sensorName || 'IMU') + ' OK' : 'Senzor: chyba / offline';
-    els.patientConnectionTitle.textContent = ok ? 'Zařízení je připojeno' : 'Zařízení není připojeno';
-    els.patientConnectionText.textContent = ok ? 'Úhel se měří přímo na Arduinu. Pohybuj se pomalu a plynule.' : 'Připoj počítač k Wi-Fi síti RehabMotion a otevři http://192.168.4.1.';
+    els.patientConnectionTitle.textContent = networkOk ? 'Zařízení je připojeno' : 'Zařízení není připojeno';
+    els.patientConnectionText.textContent = networkOk ? 'Úhel se měří přímo na Arduinu. Pohybuj se pomalu a plynule.' : 'Připoj počítač k Wi-Fi síti RehabMotion a otevři http://192.168.4.1.';
   }
   function progressFor(angle) { return Math.min(100, Math.abs(angle) / Math.max(1,targetAngle) * 100); }
   function renderStrip(angle, progress) {
@@ -260,3 +360,373 @@
 </script>
 </body>
 </html>
+)HTMLPAGE";
+
+// -----------------------------------------------------------------------------
+// SMALL HELPERS
+// -----------------------------------------------------------------------------
+
+float wrap180(float angle) {
+  while (angle > 180.0f) angle -= 360.0f;
+  while (angle < -180.0f) angle += 360.0f;
+  return angle;
+}
+
+float currentProgress() {
+  float p = fabsf(filteredAngleDeg) / (float)targetAngleDeg * 100.0f;
+  if (p > 100.0f) p = 100.0f;
+  if (p < 0.0f) p = 0.0f;
+  return p;
+}
+
+bool beginMotionSensor() {
+#if USE_EXTERNAL_MPU6050
+  if (!externalMPU.begin(0x68, &Wire)) return false;
+  externalMPU.setAccelerometerRange(MPU6050_RANGE_4_G);
+  externalMPU.setGyroRange(MPU6050_RANGE_500_DEG);
+  externalMPU.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  return true;
+#else
+  return IMU.begin();
+#endif
+}
+
+bool readMotionSample(float &ax, float &ay, float &az,
+                      float &gx, float &gy, float &gz) {
+#if USE_EXTERNAL_MPU6050
+  static uint32_t lastExternalReadMs = 0;
+  if (millis() - lastExternalReadMs < 8UL) return false;
+  lastExternalReadMs = millis();
+  sensors_event_t accelEvent, gyroEvent, tempEvent;
+  externalMPU.getEvent(&accelEvent, &gyroEvent, &tempEvent);
+  // Adafruit MPU6050 reports acceleration in m/s^2 and gyro in rad/s.
+  ax = accelEvent.acceleration.x / 9.80665f;
+  ay = accelEvent.acceleration.y / 9.80665f;
+  az = accelEvent.acceleration.z / 9.80665f;
+  gx = gyroEvent.gyro.x * RAD_TO_DEG_F;
+  gy = gyroEvent.gyro.y * RAD_TO_DEG_F;
+  gz = gyroEvent.gyro.z * RAD_TO_DEG_F;
+  return true;
+#else
+  if (!IMU.accelerationAvailable() || !IMU.gyroscopeAvailable()) return false;
+  if (!IMU.readAcceleration(ax, ay, az)) return false;
+  if (!IMU.readGyroscope(gx, gy, gz)) return false;
+  return true;
+#endif
+}
+
+void calibrateNeutral() {
+  // Keep the bar still and in its normal resting position during calibration.
+  const uint8_t wantedSamples = 45;
+  uint8_t collected = 0;
+  float angleSum = 0.0f;
+  uint32_t started = millis();
+
+  while (collected < wantedSamples && (millis() - started) < 2500UL) {
+    float ax, ay, az, gx, gy, gz;
+    if (readMotionSample(ax, ay, az, gx, gy, gz)) {
+      float a = atan2f(ay, az) * RAD_TO_DEG_F;
+      angleSum += a;
+      collected++;
+    }
+    delay(3);
+  }
+
+  if (collected > 0) {
+    neutralAngleDeg = angleSum / (float)collected;
+    filteredAngleDeg = 0.0f;
+    filterInitialized = true;
+    lastImuMicros = micros();
+    Serial.print(F("Neutral angle calibrated: "));
+    Serial.print(neutralAngleDeg, 2);
+    Serial.print(F(" deg using "));
+    Serial.println(collected);
+  } else {
+    Serial.println(F("Calibration failed: no accelerometer samples."));
+  }
+}
+
+void updateSensor() {
+  if (!sensorReady) return;
+
+  {
+    float ax, ay, az;
+    float gx, gy, gz;
+    if (!readMotionSample(ax, ay, az, gx, gy, gz)) return;
+
+    rawAx = ax;
+    rawAy = ay;
+    rawAz = az;
+    rawGx = gx;
+    rawGy = gy;
+    rawGz = gz;
+
+    const uint32_t nowUs = micros();
+    float dt = (nowUs - lastImuMicros) / 1000000.0f;
+    lastImuMicros = nowUs;
+
+    // Ignore implausibly large time gaps rather than integrating a huge jump.
+    if (dt < 0.001f || dt > 0.08f) dt = 0.01f;
+
+    const float accelAngle = wrap180(
+      atan2f(rawAy, rawAz) * RAD_TO_DEG_F - neutralAngleDeg
+    ) * SENSOR_SIGN;
+    const float gyroRate = rawGx * SENSOR_SIGN;
+
+    if (!filterInitialized) {
+      filteredAngleDeg = accelAngle;
+      filterInitialized = true;
+    } else {
+      const float gyroAngle = filteredAngleDeg + gyroRate * dt;
+      filteredAngleDeg = FILTER_ALPHA * gyroAngle + (1.0f - FILTER_ALPHA) * accelAngle;
+    }
+
+    // This device is intended for gentle range-of-motion exercises.
+    // Keep display/output bounded; this is not a clinical safety limiter.
+    if (filteredAngleDeg > 90.0f) filteredAngleDeg = 90.0f;
+    if (filteredAngleDeg < -90.0f) filteredAngleDeg = -90.0f;
+
+    lastImuMillis = millis();
+    sampleCounter++;
+  }
+}
+
+void updateLedStrip() {
+  if (millis() - lastLedUpdateMs < 35UL) return;
+  lastLedUpdateMs = millis();
+
+  strip.neoPixelClear(false);
+
+  const float progress = currentProgress();
+  const bool rightSide = (filteredAngleDeg >= 0.0f);
+  const uint8_t maxCount = rightSide ? 28 : 27;
+  const uint8_t litCount = (uint8_t)lroundf((progress / 100.0f) * maxCount);
+
+  // Dim amber LEDs represent the covered middle enclosure (28-36).
+  for (int i = 27; i <= 35; i++) {
+    strip.neoPixelSetValue(i, 7, 4, 0, false);
+  }
+
+  // Positive angle lights from LED 37 outward to LED 64.
+  // Negative angle lights from LED 27 inward to LED 1.
+  for (uint8_t i = 0; i < litCount; i++) {
+    int16_t index = rightSide ? (RIGHT_EDGE_INDEX + i) : (LEFT_EDGE_INDEX - i);
+    if (index < 0 || index >= (int16_t)LED_COUNT) continue;
+
+    if (rightSide) {
+      strip.neoPixelSetValue(index, 0, 32, 68, false);
+    } else {
+      strip.neoPixelSetValue(index, 0, 58, 24, false);
+    }
+  }
+
+  strip.neoPixelShow();
+}
+
+// -----------------------------------------------------------------------------
+// HTTP SERVER
+// -----------------------------------------------------------------------------
+
+void sendHeaders(WiFiClient &client, const char *status, const char *contentType, size_t contentLength) {
+  client.print(F("HTTP/1.1 "));
+  client.println(status);
+  client.print(F("Content-Type: "));
+  client.println(contentType);
+  client.print(F("Content-Length: "));
+  client.println((unsigned long)contentLength);
+  client.println(F("Cache-Control: no-store, no-cache, must-revalidate"));
+  client.println(F("Access-Control-Allow-Origin: *"));
+  client.println(F("Access-Control-Allow-Methods: GET, OPTIONS"));
+  client.println(F("Access-Control-Allow-Headers: Content-Type"));
+  client.println(F("Connection: close"));
+  client.println();
+}
+
+void sendJson(WiFiClient &client, const char *status, const char *body) {
+  sendHeaders(client, status, "application/json; charset=utf-8", strlen(body));
+  client.print(body);
+}
+
+String getQueryParameter(const String &url, const char *key) {
+  int q = url.indexOf('?');
+  if (q < 0) return String("");
+
+  String query = url.substring(q + 1);
+  String token = String(key) + "=";
+  int pos = query.indexOf(token);
+  if (pos < 0) return String("");
+
+  int start = pos + token.length();
+  int end = query.indexOf('&', start);
+  if (end < 0) end = query.length();
+  return query.substring(start, end);
+}
+
+void sendDataJson(WiFiClient &client) {
+  const float progress = currentProgress();
+  const bool rightSide = filteredAngleDeg >= 0.0f;
+  const int maxCount = rightSide ? 28 : 27;
+  const int ledCount = (int)lroundf((progress / 100.0f) * maxCount);
+  const bool freshSensor = sensorReady && lastImuMillis > 0 && (millis() - lastImuMillis < 1500UL);
+
+  IPAddress ip = WiFi.localIP();
+  char ipText[20];
+  snprintf(ipText, sizeof(ipText), "%u.%u.%u.%u", (unsigned)ip[0], (unsigned)ip[1], (unsigned)ip[2], (unsigned)ip[3]);
+
+  char json[560];
+  snprintf(json, sizeof(json),
+    "{\"ok\":true,\"sensorOk\":%s,\"sensor\":\"%s\",\"ip\":\"%s\","
+    "\"angle\":%.2f,\"progress\":%.1f,\"targetAngle\":%d,\"holdMs\":%lu,"
+    "\"ledCount\":%d,\"side\":\"%s\",\"samples\":%lu,\"uptimeMs\":%lu,"
+    "\"raw\":{\"ax\":%.4f,\"ay\":%.4f,\"az\":%.4f,"
+    "\"gx\":%.3f,\"gy\":%.3f,\"gz\":%.3f,\"neutralAngle\":%.2f}}",
+    freshSensor ? "true" : "false", SENSOR_NAME, ipText,
+    filteredAngleDeg, progress, targetAngleDeg, (unsigned long)holdDurationMs,
+    ledCount, rightSide ? "right" : "left", (unsigned long)sampleCounter,
+    (unsigned long)millis(), rawAx, rawAy, rawAz, rawGx, rawGy, rawGz, neutralAngleDeg
+  );
+
+  sendJson(client, "200 OK", json);
+}
+
+void handleHttpClient(WiFiClient &client) {
+  client.setTimeout(350);
+  String requestLine = client.readStringUntil('\n');
+  requestLine.trim();
+
+  // Consume request headers; requests from the supplied page are simple GETs.
+  uint32_t headerStart = millis();
+  while (client.connected() && (millis() - headerStart) < 500UL) {
+    if (client.available()) {
+      String headerLine = client.readStringUntil('\n');
+      if (headerLine == "\r" || headerLine.length() == 0) break;
+    } else {
+      delay(1);
+    }
+  }
+
+  int firstSpace = requestLine.indexOf(' ');
+  int secondSpace = requestLine.indexOf(' ', firstSpace + 1);
+  if (firstSpace < 0 || secondSpace < 0) {
+    sendJson(client, "400 Bad Request", "{\"ok\":false,\"error\":\"Bad request\"}");
+    client.stop();
+    return;
+  }
+
+  String method = requestLine.substring(0, firstSpace);
+  String url = requestLine.substring(firstSpace + 1, secondSpace);
+
+  if (method == "OPTIONS") {
+    sendHeaders(client, "204 No Content", "text/plain", 0);
+  } else if (url == "/" || url.startsWith("/?")) {
+    sendHeaders(client, "200 OK", "text/html; charset=utf-8", strlen(INDEX_HTML));
+    client.write((const uint8_t *)INDEX_HTML, strlen(INDEX_HTML));
+  } else if (url.startsWith("/api/data")) {
+    sendDataJson(client);
+  } else if (url.startsWith("/api/config")) {
+    String targetValue = getQueryParameter(url, "target");
+    String holdValue = getQueryParameter(url, "hold");
+    if (targetValue.length() > 0) {
+      int v = targetValue.toInt();
+      if (v < 5) v = 5;
+      if (v > 60) v = 60;
+      targetAngleDeg = v;
+    }
+    if (holdValue.length() > 0) {
+      long v = holdValue.toInt();
+      if (v < 500) v = 500;
+      if (v > 15000) v = 15000;
+      holdDurationMs = (uint32_t)v;
+    }
+    char json[160];
+    snprintf(json, sizeof(json), "{\"ok\":true,\"targetAngle\":%d,\"holdMs\":%lu}", targetAngleDeg, (unsigned long)holdDurationMs);
+    sendJson(client, "200 OK", json);
+  } else if (url.startsWith("/api/calibrate")) {
+    calibrateNeutral();
+    char json[130];
+    snprintf(json, sizeof(json), "{\"ok\":true,\"message\":\"Nulova poloha byla nastavena.\",\"neutralAngle\":%.2f}", neutralAngleDeg);
+    sendJson(client, "200 OK", json);
+  } else if (url.startsWith("/api/health")) {
+    sendJson(client, "200 OK", "{\"ok\":true,\"device\":\"Nano RP2040 Connect\"}");
+  } else {
+    sendJson(client, "404 Not Found", "{\"ok\":false,\"error\":\"Not found\"}");
+  }
+
+  delay(2);
+  client.stop();
+}
+
+// -----------------------------------------------------------------------------
+// WIFI STARTUP / RETRY
+// -----------------------------------------------------------------------------
+
+void startAccessPoint() {
+  Serial.println(F("Starting Wi-Fi access point..."));
+  int status = WiFi.beginAP(AP_SSID, AP_PASSWORD, AP_CHANNEL);
+  if (status == WL_AP_LISTENING) {
+    delay(700);
+    server.begin();
+    wifiReady = true;
+    Serial.println(F("Wi-Fi AP ready."));
+    Serial.print(F("SSID: ")); Serial.println(AP_SSID);
+    Serial.print(F("Password: ")); Serial.println(AP_PASSWORD);
+    Serial.print(F("Open in browser: http://")); Serial.println(WiFi.localIP());
+  } else {
+    wifiReady = false;
+    Serial.print(F("Wi-Fi AP start failed. Status: "));
+    Serial.println(status);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// SETUP / LOOP
+// -----------------------------------------------------------------------------
+
+void setup() {
+  Serial.begin(115200);
+  delay(800);
+  Serial.println();
+  Serial.println(F("===================================="));
+  Serial.println(F("       REHAB MOTION LAB"));
+  Serial.println(F(" Arduino Nano RP2040 Connect"));
+  Serial.println(F("===================================="));
+
+  strip.neoPixelClear(true);
+
+#if USE_EXTERNAL_MPU6050
+  Serial.println(F("Initializing external MPU6050 over I2C..."));
+#else
+  Serial.println(F("Initializing built-in LSM6DSOX IMU..."));
+#endif
+  if (beginMotionSensor()) {
+    sensorReady = true;
+    Serial.print(SENSOR_NAME); Serial.println(F(" initialized."));
+    Serial.println(F("Keep the bar still in neutral position for calibration."));
+    delay(300);
+    calibrateNeutral();
+  } else {
+    sensorReady = false;
+    Serial.print(F("ERROR: Could not initialize ")); Serial.println(SENSOR_NAME);
+    Serial.println(F("The web page will still open, but sensor data will be unavailable."));
+  }
+
+  lastImuMicros = micros();
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println(F("ERROR: NINA Wi-Fi module not detected. Check WiFiNINA firmware."));
+  } else {
+    startAccessPoint();
+  }
+}
+
+void loop() {
+  updateSensor();
+  updateLedStrip();
+
+  if (wifiReady) {
+    WiFiClient client = server.available();
+    if (client) handleHttpClient(client);
+  } else if (millis() - lastWifiRetryMs > 8000UL) {
+    lastWifiRetryMs = millis();
+    if (WiFi.status() != WL_NO_MODULE) startAccessPoint();
+  }
+}

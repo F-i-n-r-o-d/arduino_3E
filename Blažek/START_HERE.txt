@@ -1,24 +1,15 @@
-REHAB MOTION LAB – ARDUINO NANO RP2040 CONNECT
+REHAB MOTION LAB – NANO RP2040 CONNECT
 
-SOUBORY:
-- rehab_motion_lab.html: samostatna webova aplikace
-- RehabMotionNanoRP2040.ino: kompletni firmware pro Arduino IDE
-- NAVOD_RehabMotionLab.txt: cesky navod
+1) Nainstalujte Arduino IDE 2.x.
+2) Boards Manager: nainstalujte Arduino Mbed OS Nano Boards.
+3) Vyberte Arduino Nano RP2040 Connect.
+4) Library Manager: nainstalujte WiFiNINA, Arduino_LSM6DSOX a NeoPixelConnect.
+5) Otevřete RehabMotionNanoRP2040_FIXED.ino a nahrajte do desky přes USB.
+6) Otevřete Serial Monitor na 115200 baud. Po zapnutí nechte desku v neutrální poloze.
+7) Připojte počítač/telefon k Wi-Fi RehabMotion, heslo Rehab2026. Zvolte zůstat připojeni i bez internetu.
+8) Otevřete v prohlížeči http://192.168.4.1 – stránku servíruje přímo Arduino.
 
-RYCHLE SPUSTENI:
-1. V Arduino IDE nainstalujte balicek desek "Arduino Mbed OS Nano Boards".
-2. Vyberte desku "Arduino Nano RP2040 Connect".
-3. Nainstalujte knihovny WiFiNINA, Arduino_LSM6DSOX a NeoPixelConnect.
-4. Otevrete RehabMotionNanoRP2040.ino a nahrajte ho do desky.
-5. Pripojte pocitac k Wi-Fi siti RehabMotion (heslo Rehab2026).
-6. Otevrete http://192.168.4.1 – webovou aplikaci poskytuje primo Arduino.
+HTML lze otevřít samostatně pro simulaci. Pro skutečná data otevřete stránku přímo na IP Arduina.
+LED pásek: externí 5V zdroj, společná GND, datový převodník 3.3V->5V, sériový rezistor 330–470 ohm a kondenzátor 1000uF u pásku. LED nikdy nenapájejte z desky.
 
-POZNAMKA:
-HTML soubor lze otevrit samostatne pro simulaci a vyvoj. Pro skutecna data
-z Arduina pouzijte adresu http://192.168.4.1 po pripojeni k Wi-Fi desky.
-
-BEZPECNOST:
-LED pasek WS2812B napajejte samostatnym 5V zdrojem. Nespojujte jeho napajeni
-s 3.3V vystupem desky. GND zdroje a GND Arduina musi byt propojene.
-Pouzijte prevodnik logicke urovne 3.3V na 5V pro datovy pin LED.
-Pred rehabilitacnim pouzitim overte smer osy, kalibraci a bezpecny rozsah pohybu.
+První test: nejdříve nahrajte firmware a ověřte Wi-Fi a /api/health bez LED pásku. Poté ověřte /api/data a pohyb úhlu. Teprve potom zapojte LED pásek.
