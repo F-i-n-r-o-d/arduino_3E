@@ -39,6 +39,10 @@
   .legenda a { color: #58a6ff; }
   #solo { background: #1f6feb; }
   #solo:hover { background: #388bfd; }
+  #bot, #konecBota { background: #8957e5; }
+  #bot:hover, #konecBota:hover { background: #a371f7; }
+  #botVolba { display: flex; gap: 6px; }
+  select { font: inherit; padding: 10px; background: #21262d; color: #eee; border: 1px solid #30363d; border-radius: 6px; }
   button { font: inherit; padding: 10px 24px; background: #238636; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
   button:hover { background: #2ea043; }
 </style>
@@ -65,6 +69,15 @@
   </p>
   <div class="tlacitka">
     <button id="solo" hidden>Spustit sólo hru</button>
+    <span id="botVolba" hidden>
+      <select id="uroven" title="Obtížnost bota">
+        <option value="lehka">Lehký bot</option>
+        <option value="stredni" selected>Střední bot</option>
+        <option value="tezka">Těžký bot</option>
+      </select>
+      <button id="bot">Hrát proti botovi</button>
+    </span>
+    <button id="konecBota" hidden>Ukončit bota</button>
     <button id="novaHra">Nová hra</button>
   </div>
   <p class="legenda">Test bez hardwaru: <a href="/tyc" target="_blank">obě virtuální tyče</a> ·
@@ -75,7 +88,8 @@
   const room = new URLSearchParams(location.search).get('room') || 'rehab';
   const karty = [...document.querySelectorAll('.hrac')];
   const stav = document.getElementById('stav');
-  const nazev = id => id.replace(/^tyc(\d+)$/, 'Tyč $1');
+  const BOT = 'bot';
+  const nazev = id => id === BOT ? 'Bot' + (bot ? ' (' + bot.popis + ')' : '') : id.replace(/^tyc(\d+)$/, 'Tyč $1');
   const naProcenta = led => ((led + 0.5) / LED * 100) + '%';
 
   // 10 teček pro skóre
@@ -86,22 +100,25 @@
   }
 
   function vykresli(m) {
-    const hraci = m.players.slice().sort((a, b) => a.id.localeCompare(b.id));
+    const hraci = m.players.slice().sort((a, b) => (a.id === BOT) - (b.id === BOT) || a.id.localeCompare(b.id));   // bot vždy dole
     const vitez = hraci.find(p => p.winner);
     const pripojeno = hraci.filter(p => p.connected).length;
     stav.className = m.state === 'finished' ? 'konec' : '';
     if (m.state === 'waiting') stav.textContent = pripojeno === 1
-      ? 'Připojená je jedna tyč – čeká se na druhou, nebo spusť sólo hru'
+      ? 'Připojená je jedna tyč – čeká se na druhou, nebo spusť sólo hru či hru proti botovi'
       : 'Čeká se na připojení tyčí…';
     else if (m.state === 'playing') stav.textContent = m.solo
       ? 'Sólo hra – splň ' + VITEZ + ' úkolů'
-      : 'Hraje se – kdo první splní ' + VITEZ + ' úkolů, vyhrává';
+      : (hraci.some(p => p.id === BOT) ? 'Hra proti botovi' : 'Hraje se') + ' – kdo první splní ' + VITEZ + ' úkolů, vyhrává';
     else stav.textContent = !vitez ? 'Konec hry' : m.solo
       ? 'Hotovo! ' + nazev(vitez.id) + ' splnila ' + VITEZ + ' úkolů'
-      : 'Vyhrála ' + nazev(vitez.id) + '!';
+      : vitez.id === BOT ? 'Vyhrál bot!' : 'Vyhrála ' + nazev(vitez.id) + '!';
 
-    // sólo jen když je připojená právě jedna tyč a nic neběží – jakmile se připojí druhá, tlačítko zmizí
-    document.getElementById('solo').hidden = !(m.state === 'waiting' && pripojeno === 1);
+    // sólo a bot jen když je připojená právě jedna tyč a nic neběží – jakmile se připojí druhá, tlačítka zmizí
+    const jednaTyc = m.state === 'waiting' && pripojeno === 1 && !hraci.some(p => p.id === BOT);
+    document.getElementById('solo').hidden = !jednaTyc;
+    document.getElementById('botVolba').hidden = !jednaTyc || !!bot;
+    document.getElementById('konecBota').hidden = !bot;
     karty[1].hidden = m.solo;
 
     karty.forEach((k, i) => {
@@ -147,6 +164,83 @@
     fetch('/api/rooms/' + encodeURIComponent(room) + '/solo', { method: 'POST' });
   document.getElementById('novaHra').onclick = () =>
     fetch('/api/rooms/' + encodeURIComponent(room) + '/reset', { method: 'POST' });
+
+  // ---------- bot: soupeř pro jednu tyč ----------
+  // Běží v tomhle okně a se serverem mluví stejně jako tyč. Každou hru má trochu jinou „povahu“.
+  const SIRKA_CILE = 10, DOBA_V_CILI = 1.5;   // s
+  const UROVNE = {   // rychlost (LED/s), reakce na nový cíl (s), třes ruky (LED), o kolik míří vedle středu pásu (LED)
+    lehka:   { rychlost: 6,  reakce: 1.6,  tres: 3.5, mireni: 3 },
+    stredni: { rychlost: 12, reakce: 0.9,  tres: 2,   mireni: 2 },
+    tezka:   { rychlost: 28, reakce: 0.35, tres: 1,   mireni: 1 },
+  };
+  const nahodne = (od, po) => od + Math.random() * (po - od);
+  const stredPasu = b => b.cil + SIRKA_CILE / 2 - 0.5;
+
+  function novaHraBota(b) {   // náhodná povaha na celou hru
+    const u = UROVNE[b.uroven];
+    b.rychlost = u.rychlost * nahodne(0.8, 1.2);
+    b.reakce = u.reakce * nahodne(0.7, 1.3);
+    b.tres = u.tres * nahodne(0.7, 1.3);
+    b.f1 = nahodne(0.3, 0.8);   // Hz – pomalé houpání
+    b.f2 = nahodne(1, 2.5);     // Hz – rychlejší chvění
+    b.skore = 0;
+    novyCilBota(b);
+  }
+
+  function novyCilBota(b) {
+    do b.cil = Math.floor(Math.random() * (LED - SIRKA_CILE + 1)); while (b.pos >= b.cil && b.pos < b.cil + SIRKA_CILE);
+    b.mir = stredPasu(b) + nahodne(-1, 1) * UROVNE[b.uroven].mireni;   // kam přesně míří
+    b.cekat = b.reakce * nahodne(0.5, 1.5);                             // chvíli trvá, než si cíle všimne
+    b.vCili = 0;
+  }
+
+  // jeden krok (dt v sekundách); vrátí true, když bot získal bod
+  function krokBota(b, dt, hraje) {
+    b.t += dt;
+    if (b.cekat > 0) b.cekat -= dt;
+    else b.ruka += Math.max(-b.rychlost * dt, Math.min(b.rychlost * dt, (b.mir - b.ruka) * 4 * dt));   // u cíle zpomalí
+    const tres = b.tres * (0.7 * Math.sin(2 * Math.PI * b.f1 * b.t) + 0.3 * Math.sin(2 * Math.PI * b.f2 * b.t + 2));
+    b.pos = Math.max(0, Math.min(LED - 1, Math.round(b.ruka + tres)));
+    if (!hraje) { b.vCili = 0; return false; }
+    if (b.pos >= b.cil && b.pos < b.cil + SIRKA_CILE) {
+      b.vCili += dt;
+      if (b.vCili < DOBA_V_CILI) return false;
+      b.skore++;
+      novyCilBota(b);
+      return true;
+    }
+    if (b.vCili > 0) b.mir += (stredPasu(b) - b.mir) / 2;   // vypadl z pásu => příště míří blíž ke středu
+    b.vCili = 0;
+    return false;
+  }
+
+  let bot = null;   // bot spuštěný z tohoto okna
+  function spustBota() {
+    const volba = document.getElementById('uroven');
+    const b = bot = { uroven: volba.value, popis: volba.selectedOptions[0].text.split(' ')[0].toLowerCase(),
+      ruka: 32, pos: 32, t: 0, epocha: -1, stav: 'waiting' };
+    novaHraBota(b);
+    const ws = b.ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+    const posli = o => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
+    ws.onopen = () => posli({ type: 'join', room, id: BOT });
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      if (m.type !== 'status') return;   // 'kicked' / 'full': server spojení zavře sám
+      if (m.epoch !== b.epocha) { if (b.epocha !== -1) novaHraBota(b); b.epocha = m.epoch; }   // nová hra => nová povaha
+      b.stav = m.state;
+    };
+    ws.onclose = () => { clearInterval(smycka); if (bot === b) bot = null; };
+    let posledni = performance.now();
+    const smycka = setInterval(() => {
+      const ted = performance.now(), dt = Math.min(1, (ted - posledni) / 1000);
+      posledni = ted;
+      if (krokBota(b, dt, b.stav === 'playing' && b.skore < VITEZ)) posli({ type: 'score', score: b.skore, epoch: b.epocha });
+      posli({ type: 'pos', pos: b.pos, cil: b.cil });
+    }, 50);
+  }
+
+  document.getElementById('bot').onclick = () => { if (!bot) spustBota(); };
+  document.getElementById('konecBota').onclick = () => { if (bot) bot.ws.close(); };
 
   pripoj();
 </script>
