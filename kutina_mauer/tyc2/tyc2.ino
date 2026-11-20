@@ -21,8 +21,10 @@ const int SERVER_PORT  = 3000;
 #define SIRKA_CILE 10
 #define VITEZNE_SKORE 10
 const unsigned long DOBA_V_CILI  = 1500;    // ms – jak dlouho držet kuličku ve žlutém pásu
-const unsigned long DOBA_OTOCENI = 3000;    // ms – jak dlouho držet otočenou tyč
-const float PRAH_OTOCENI = -0.5;            // osa Z oproti poloze při zapnutí: pod prahem = tyč je otočená
+const float VYHLAZENI = 0.12;               // 0–1: menší = plynulejší pohyb, větší = rychlejší reakce
+const float PRAH_TRESENI = 2.0;             // g – tak silný náraz se počítá do zatřesení
+const int POCET_NARAZU = 3;                 // kolik nárazů rychle po sobě = zatřesení
+const unsigned long OKNO_TRESENI = 1000;    // ms – během jak dlouhé doby
 
 NeoPixelConnect np(4, POCET_LED, pio0, 0);
 WiFiClient wifi;
@@ -37,15 +39,19 @@ int skore = 0;
 long epocha = -1;            // číslo hry ze serveru (-1 = zatím neznámé)
 
 float x, y, z;
-int zNormalne = 1;           // znaménko osy Z v normální poloze (zjistí se při zapnutí)
-int pozice = 0;              // moje červená dioda
+float poziceF = 31.5;        // vyhlazená poloha kuličky – může být i mezi dvěma diodami
+int pozice = 31;             // moje červená dioda (celé číslo pro hru a server)
 int cil = 0;                 // začátek mého žlutého pásu
 int souperPozice = -1;       // modrá dioda soupeře (-1 = soupeř není vidět)
 bool rezimSkore = false;
 
 bool pripojeno = false;
-unsigned long vCiliOd = 0, otocenaOd = 0, posledniPokus = 0, posledniOdeslani = 0;
+unsigned long vCiliOd = 0, posledniPokus = 0, posledniOdeslani = 0;
 int odeslanaPozice = -1, odeslanyCil = -1;
+
+int narazy = 0;              // počítadlo nárazů pro zatřesení
+bool nadPrahem = false;
+unsigned long prvniNaraz = 0, posledniTreseni = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -57,14 +63,6 @@ void setup() {
     while (1);
   }
 
-  // normální poloha = poloha při zapnutí (tyč leží LED nahoru), podle ní se pozná otočení
-  unsigned long start = millis();
-  while (!IMU.accelerationAvailable() && millis() - start < 1000);
-  IMU.readAcceleration(x, y, z);
-  zNormalne = (z >= 0) ? 1 : -1;
-  Serial.print("Normalni poloha: z = ");
-  Serial.println(z);
-
   randomSeed(analogRead(A0));
   novyCil();
 }
@@ -75,20 +73,20 @@ void loop() {
 
   if (IMU.accelerationAvailable()) {
     IMU.readAcceleration(x, y, z);
+    // náklon -0.5 g až +0.5 g => dioda 0 až 63, vyhlazeno, aby se třes ruky nepřenášel na diodu
+    float cilovaPozice = constrain((x + 0.5) * (POCET_LED - 1), 0, POCET_LED - 1);
+    hlidejZatreseni();
+    if (!nadPrahem) poziceF += (cilovaPozice - poziceF) * VYHLAZENI;   // při nárazu (třesení) kulička stojí
   }
-  pozice = constrain(mapFloat(x, -0.5, 0.5, 0, POCET_LED - 1), 0, POCET_LED - 1);
+  // celá dioda pro hru: mění se až o kus dál, aby na hranici dvou diod neblikala tam a zpět
+  if (fabs(poziceF - pozice) > 0.7) pozice = round(poziceF);
 
-  hlidejOtoceni();
   if (stav == HRA && !rezimSkore) hraj();
   posliPozici();
   vykresli();
 }
 
 // ---------- HRA ----------
-
-int mapFloat(float val, float in_min, float in_max, int out_min, int out_max) {
-  return (val - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-}
 
 void novyCil() {
   do {
@@ -100,7 +98,7 @@ void novyCil() {
 // Kulička musí být v cíli bez přerušení DOBA_V_CILI => bod a nový cíl.
 void hraj() {
   if (skore >= VITEZNE_SKORE) return;   // čekáme, až server vyhlásí konec
-  bool vCili = pozice >= cil && pozice < cil + SIRKA_CILE;
+  bool vCili = poziceF >= cil - 0.5 && poziceF < cil + SIRKA_CILE - 0.5;   // stejně, jak je kulička vidět
   if (!vCili) {
     vCiliOd = 0;
     return;
@@ -115,25 +113,39 @@ void hraj() {
   }
 }
 
-// Osa Z: tyč otočená a držená 3 s => režim skóre.
-// Stejné gesto po konci hry spustí novou hru a při čekání na soupeře sólo hru.
-void hlidejOtoceni() {
-  if (z * zNormalne >= PRAH_OTOCENI) {
-    otocenaOd = 0;
-    rezimSkore = false;
+// Zatřesení = POCET_NARAZU silných nárazů (celkové zrychlení nad PRAH_TRESENI) během OKNO_TRESENI.
+// Běžné naklánění má kolem 1 g, takže se s tím nesplete.
+void hlidejZatreseni() {
+  float a = sqrt(x * x + y * y + z * z);
+  if (nadPrahem) {
+    if (a < 1.3) nadPrahem = false;        // náraz skončil, čekáme na další
     return;
   }
-  if (otocenaOd == 0) otocenaOd = millis();
-  if (millis() - otocenaOd < DOBA_OTOCENI) return;
+  if (a < PRAH_TRESENI) return;
+  nadPrahem = true;
+  if (narazy == 0 || millis() - prvniNaraz > OKNO_TRESENI) {
+    narazy = 0;
+    prvniNaraz = millis();
+  }
+  narazy++;
+  if (narazy < POCET_NARAZU) return;
+  narazy = 0;
+  if (millis() - posledniTreseni < 1500) return;   // jedno zatřesení se nepočítá dvakrát
+  posledniTreseni = millis();
+  zatreseni();
+}
 
+// Zatřesení přepíná režim skóre (zůstane, dokud znovu nezatřeseš).
+// Po konci hry spustí novou hru, při čekání na soupeře sólo hru.
+void zatreseni() {
+  Serial.println("Zatreseni!");
   if (stav == KONEC) {
     posli("{\"type\":\"rematch\"}");
-    otocenaOd = millis();   // případný další pokus až za 3 s
   } else if (stav == CEKANI) {
     posli("{\"type\":\"solo\"}");
-    otocenaOd = millis();
   } else {
-    rezimSkore = true;
+    rezimSkore = !rezimSkore;
+    vCiliOd = 0;                           // čas v cíli se počítá znovu
   }
 }
 
@@ -148,12 +160,20 @@ void vykresli() {
       }
     } else if (rezimSkore) {
       if (i < skore) r = g = b = 60;       // bílé diody = počet splněných úkolů
-    } else if (i == pozice) {
-      r = 120;                             // já – červená
-    } else if (i == souperPozice) {
-      b = 120;                             // soupeř – modrá
-    } else if (stav == HRA && i >= cil && i < cil + SIRKA_CILE) {
-      r = 20; g = 20;                      // můj cíl – žlutá
+    } else {
+      if (i == souperPozice) {
+        b = 120;                           // soupeř – modrá
+      } else if (stav == HRA && i >= cil && i < cil + SIRKA_CILE) {
+        r = 20; g = 20;                    // můj cíl – žlutá
+      }
+      // moje kulička: svítí na dvou sousedních diodách podle přesné polohy => plynulý pohyb
+      float k = 1.0 - fabs(i - poziceF);
+      if (k > 0) {
+        k = sqrt(k);                       // i mezi dvěma diodami svítí kulička stejně jasně
+        r = r * (1 - k) + 120 * k;
+        g = g * (1 - k);
+        b = b * (1 - k);
+      }
     }
     np.neoPixelSetValue(i, r, g, b, false);
   }
@@ -267,6 +287,7 @@ void zpracujZpravu(const char* zprava) {
     if (strstr(zprava, "\"state\":\"playing\"")) stav = HRA;
     else if (strstr(zprava, "\"state\":\"finished\"")) stav = KONEC;
     else stav = CEKANI;
+    if (stav != HRA) rezimSkore = false;
     solo = strstr(zprava, "\"solo\":true") != NULL;
     vyhral = strstr(zprava, "\"won\":true") != NULL;
     if (!strstr(zprava, "\"oppConnected\":true")) souperPozice = -1;
@@ -287,7 +308,7 @@ void zpracujZpravu(const char* zprava) {
     Serial.print("Stav: ");
     if (stav == HRA) Serial.print(solo ? "solo hra" : "duel");
     else if (stav == KONEC) Serial.print(vyhral ? "VYHRA" : "prohra");
-    else Serial.print("cekam na soupere (otoc tyc na 3 s = solo hra)");
+    else Serial.print("cekam na soupere (zatres tyci = solo hra)");
     Serial.print(", skore ");
     Serial.println(skore);
 
