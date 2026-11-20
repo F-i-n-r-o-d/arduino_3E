@@ -618,9 +618,26 @@ void handleHttpClient(WiFiClient &client) {
 
   if (method == "OPTIONS") {
     sendHeaders(client, "204 No Content", "text/plain", 0);
-  } else if (url == "/" || url.startsWith("/?")) {
-    sendHeaders(client, "200 OK", "text/html; charset=utf-8", strlen(INDEX_HTML));
-    client.write((const uint8_t *)INDEX_HTML, strlen(INDEX_HTML));
+} else if (url == "/" || url.startsWith("/?")) {
+    const size_t totalLen = strlen(INDEX_HTML);
+    sendHeaders(client, "200 OK", "text/html; charset=utf-8", totalLen);
+    
+    const size_t chunkSize = 1024;
+    size_t sent = 0;
+    while (sent < totalLen && client.connected()) {
+      size_t toSend = totalLen - sent;
+      if (toSend > chunkSize) toSend = chunkSize;
+      
+      size_t written = client.write((const uint8_t *)(INDEX_HTML + sent), toSend);
+      if (written == 0) {
+        delay(5); // Buffer modulu NINA je plný, počkáme na uvolnění
+        continue;
+      }
+      sent += written;
+      delay(3); // Krátká pauza pro přenos po SPI do Wi-Fi čipu
+    }
+    client.flush();
+    delay(20);
   } else if (url.startsWith("/api/data")) {
     sendDataJson(client);
   } else if (url.startsWith("/api/config")) {
