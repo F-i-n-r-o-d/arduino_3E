@@ -43,8 +43,7 @@ V souboru `tyc1/tyc1.ino` je nahoře část `NASTAVENÍ`. Tam je potřeba vyplni
 Deska je Arduino Nano RP2040 Connect. V Library Manageru je potřeba mít knihovny NeoPixelConnect, Arduino_LSM6DSOX,
 WiFiNINA a ArduinoHttpClient (tu poslední původní program nepoužíval, takže ji asi bude potřeba doinstalovat).
 
-Po nahrání programu nechte tyč chvíli ležet normálně (LEDkami nahoru). Při zapnutí si totiž zapamatuje, jak vypadá
-normální poloha, a podle toho pak pozná, kdy je otočená. Dokud se připojuje k Wi-Fi a serveru, svítí první dioda
+Dokud se tyč připojuje k Wi-Fi a serveru, svítí první dioda
 modře. Co se děje, se dá sledovat i v Serial monitoru (115200).
 
 ### 3. Web
@@ -54,26 +53,40 @@ Otevřete v prohlížeči http://localhost:3000. Jakmile se tyč připojí, v ko
 
 ## Sólo hra
 
-Když je připojená jen jedna tyč, na stránce se objeví tlačítko **Spustit sólo hru**. Druhá možnost je otočit tyč
-a podržet ji tak 3 sekundy. Tlačítko se ukazuje jenom tehdy, když druhá tyč připojená není. Kdyby se druhá tyč
+Když je připojená jen jedna tyč, na stránce se objeví tlačítko **Spustit sólo hru**. Druhá možnost je zatřást
+tyčí. Tlačítko se ukazuje jenom tehdy, když druhá tyč připojená není. Kdyby se druhá tyč
 připojila během sólo hry, sólo skončí a začne normální hra dvou hráčů od nuly.
 
 Jednu skutečnou tyč jde taky vyzkoušet proti virtuální tyči v prohlížeči: http://localhost:3000/tyc?id=tyc2
+
+## Hra proti botovi
+
+Když je připojená jen jedna tyč, jde na webu vybrat obtížnost a kliknout na **Hrát proti botovi**. Bot je soupeř,
+který běží přímo ve stránce a hraje podle stejných pravidel jako tyč: jede ke svému žlutému pásu, třese se mu „ruka“
+a musí v pásu vydržet 1,5 s. Každou hru dostane trochu jinou rychlost, reakci a třes, takže pokaždé hraje jinak.
+
+- **Lehký bot** – hra mu trvá zhruba minutu.
+- **Střední bot** – zhruba 35–40 s.
+- **Těžký bot** – zhruba 25 s.
+
+Bot hraje, dokud je stránka otevřená. Ukončí se tlačítkem **Ukončit bota** nebo zavřením stránky. Když se připojí
+druhá skutečná tyč, bot ustoupí a začne normální hra dvou hráčů od nuly.
 
 ## Ovládání
 
 - Náklon tyče hýbe červenou diodou. Když ji udržíte 1,5 s ve žlutém pásu, dostanete bod a pás se přesune jinam.
 - Modrá dioda je soupeř (jeho žlutý pás nevidíte).
-- Když tyč otočíte a podržíte 3 s, ukáže se skóre (svítí tolik bílých diod, kolik máte bodů). Po otočení zpět se
-  hraje dál.
-- Na konci hry bliká vítěz zeleně a poražený červeně. Novou hru spustíte otočením tyče na 3 s nebo tlačítkem
+- Když tyčí rychle zatřesete (tři rychlé pohyby za sebou), ukáže se skóre (svítí tolik bílých diod, kolik máte
+  bodů). Skóre zůstane svítit, dokud nezatřesete znovu, pak se hraje dál.
+- Kulička se pohybuje plynule: náklon je vyhlazený a kulička se „přelévá“ mezi dvěma sousedními diodami.
+- Na konci hry bliká vítěz zeleně a poražený červeně. Novou hru spustíte zatřesením tyče nebo tlačítkem
   **Nová hra** na webu.
 - Když vypadne spojení, tyč hraje dál bez serveru a body pošle, až se zase připojí.
 
 ## Testování bez tyče
 
 Spusťte server (`npm start`) a otevřete http://localhost:3000/tyc. Jsou tam dvě virtuální tyče, které se dají
-naklánět myší nebo klávesami (tyč 1: A, D a W na otočení, tyč 2: šipky ← → a ↑ na otočení). Vedle si otevřete
+naklánět myší nebo klávesami (tyč 1: A, D a W na zatřesení, tyč 2: šipky ← → a ↑ na zatřesení). Vedle si otevřete
 http://localhost:3000 a uvidíte, jak se to propisuje.
 
 Nebo `npm run simulace` – spustí server a dvě tyče, které hrají samy.
