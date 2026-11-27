@@ -1,0 +1,13 @@
+# renderIndex (values - renderFunction()[ - info])
+- 1 - renderMain()
+- 2 - renderWifi()
+  - 20 - renderWifiMenu(0) - connect to others Wi-Fi
+  - 21 - renderWifiMenu(1) - search some attacks around
+  - 22 - renderWifiMenu(2) - access point/evil twin
+  - 23 - renderWifiMenu(3) - NEMO portal
+- 3 - renderBluetooth()
+  - 30 - renderBluetoothMenu(0) - spam android phones
+  - 31 - renderBluetoothMenu(0) - spam iphones
+- 4 - renderIR()
+  - 40 - renderIRMenu() - just info about sending Off signals to TVs
+- 5 - 3D cube
