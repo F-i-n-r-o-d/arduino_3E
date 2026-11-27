@@ -1,35 +1,28 @@
 /*
-  Rehabilitační veslařská tyč - verze s JSON výstupem
+  Rehabilitační veslařská tyč - verze s JSON výstupem (upraveno pro Arduino Nano RP2040 Connect)
 
-  - MPU6050 (I2C) měří náklon, detekce záběrů, tempo, LED pásek (jako dříve)
-  - NOVĚ: data se připravují ve formátu JSON a posílají
-      1) přes USB (Serial, 1 řádek JSON každých 100 ms)  -> funguje na Uno/Nano/ESP32
-      2) přes WiFi na ESP32: http://<IP>/data  (JSON), http://<IP>/reset (vynuluje počítadlo)
+  - Vestavěný LSM6DSOX měří náklon, detekce záběrů, tempo, LED pásek
+  - Data se připravují ve formátu JSON a posílají:
+      1) přes USB (Serial, 1 řádek JSON každých 100 ms)
+      2) přes WiFi: http://<IP>/data (JSON), http://<IP>/reset (vynuluje počítadlo)
 
-  Ukázka JSON:
-  {"t":12345,"angle":12.3,"strokes":14,"spm":21.4,"target":22,"score":0.87,"leds":26,"numLeds":30}
-
-  Knihovny: Adafruit NeoPixel
+  Knihovny: NeoPixelConnect, Arduino_LSM6DSOX, WiFiNINA
 */
 
-#include <Wire.h>
-#include <Adafruit_NeoPixel.h>
-
-#if defined(ESP32)
-  #define USE_WIFI 1
-  #include <WiFi.h>
-  #include <WebServer.h>
-#else
-  #define USE_WIFI 0
-#endif
+#include <NeoPixelConnect.h>
+#include <Arduino_LSM6DSOX.h>
+#include <WiFiNINA.h>
+#include <SPI.h>
+#include <math.h>
 
 // ====================== NASTAVENÍ ======================
-#define LED_PIN        6       // u ESP32 změň třeba na 5
-#define NUM_LEDS       30
-#define LED_BRIGHTNESS 80
+#define LED_PIN        4       // Pin D4 pro vaši rehabilitační tyč
+#define NUM_LEDS       64      // Počet LED na vaší tyči
+#define LED_BRIGHTNESS 80      // Jas 0-255
 
-const char* WIFI_SSID = "NAZEV_WIFI";
-const char* WIFI_PASS = "HESLO_WIFI";
+#define USE_WIFI       1       // 1 = zapnout WiFi a webový server, 0 = jen USB
+const char WIFI_SSID[] = "NAZEV_WIFI";
+const char WIFI_PASS[] = "HESLO_WIFI";
 
 const float ANGLE_HIGH = 15.0;
 const float ANGLE_LOW  = -15.0;
@@ -39,11 +32,10 @@ const unsigned long TIMEOUT_MS    = 5000;
 const float TARGET_SPM    = 22.0;
 const float TOLERANCE_SPM = 10.0;
 
-#define TILT_AXIS 0            // 0 = osa X, 1 = osa Y
+#define TILT_AXIS 0            // 0 = osa X (podélná osa tyče), 1 = osa Y
 // =======================================================
 
-Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
-const int MPU_ADDR = 0x68;
+NeoPixelConnect strip(LED_PIN, NUM_LEDS, pio0, 0);
 
 float angle = 0;
 bool  wasLow = false;
@@ -56,68 +48,68 @@ unsigned long flashUntil = 0;
 unsigned long lastJson = 0;
 
 #if USE_WIFI
-WebServer server(80);
+WiFiServer server(80);
 #endif
 
 // ---------------------- PŘÍPRAVA DAT VE FORMÁTU JSON ----------------------
 String buildJson() {
   String j;
   j.reserve(160);
-  j  = "{\"t\":";        j += millis();
-  j += ",\"angle\":";    j += String(angle, 1);
-  j += ",\"strokes\":";  j += strokeCount;
-  j += ",\"spm\":";      j += String(spm, 1);
-  j += ",\"target\":";   j += String(TARGET_SPM, 0);
-  j += ",\"score\":";    j += String(score, 2);
-  j += ",\"leds\":";     j += (int)(displayLevel + 0.5);
-  j += ",\"numLeds\":";  j += NUM_LEDS;
+  j  = "{\"t\":";         j += millis();
+  j += ",\"angle\":";     j += String(angle, 1);
+  j += ",\"strokes\":";   j += strokeCount;
+  j += ",\"spm\":";       j += String(spm, 1);
+  j += ",\"target\":";    j += String(TARGET_SPM, 0);
+  j += ",\"score\":";     j += String(score, 2);
+  j += ",\"leds\":";      j += (int)(displayLevel + 0.5);
+  j += ",\"numLeds\":";   j += NUM_LEDS;
   j += "}";
   return j;
 }
 
-// ---------------------- MPU6050 ----------------------
-void mpuInit() {
-  Wire.begin();
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x6B);
-  Wire.write(0);
-  Wire.endTransmission(true);
-}
-
+// ---------------------- ČTENÍ AKCELEROMETRU (LSM6DSOX) ----------------------
 bool readAngle(float &outAngle) {
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x3B);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(MPU_ADDR, 6, true) != 6) return false;
+  if (!IMU.accelerationAvailable()) return false;
 
-  int16_t ax = (Wire.read() << 8) | Wire.read();
-  int16_t ay = (Wire.read() << 8) | Wire.read();
-  int16_t az = (Wire.read() << 8) | Wire.read();
-  float fx = ax / 16384.0, fy = ay / 16384.0, fz = az / 16384.0;
+  float fx, fy, fz;
+  if (!IMU.readAcceleration(fx, fy, fz)) return false;
 
   if (TILT_AXIS == 0) outAngle = atan2(fx, sqrt(fy * fy + fz * fz)) * 180.0 / PI;
   else                outAngle = atan2(fy, sqrt(fx * fx + fz * fz)) * 180.0 / PI;
   return true;
 }
 
-// ---------------------- LED ----------------------
-uint32_t colorForScore(float s) {
-  return strip.Color((uint8_t)(255 * (1.0 - s)), (uint8_t)(255 * s), 0);
+// ---------------------- LED (NeoPixelConnect) ----------------------
+void setLedScaled(int index, uint8_t r, uint8_t g, uint8_t b) {
+  uint8_t sr = (r * LED_BRIGHTNESS) / 255;
+  uint8_t sg = (g * LED_BRIGHTNESS) / 255;
+  uint8_t sb = (b * LED_BRIGHTNESS) / 255;
+  strip.neoPixelSetValue((uint8_t)index, sr, sg, sb, false);
 }
 
 void showLeds() {
   float target = score * NUM_LEDS;
   displayLevel += (target - displayLevel) * 0.1;
 
-  strip.clear();
+  strip.neoPixelClear(false);
+
+  // Krátké modré probliknutí při dokončení záběru
   if (millis() < flashUntil) {
-    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, strip.Color(0, 0, 60));
+    for (int i = 0; i < NUM_LEDS; i++) {
+      setLedScaled(i, 0, 0, 60);
+    }
   }
+
+  // Vykreslení sloupce podle skóre (plynulý přechod z červené do zelené)
   int lit = (int)(displayLevel + 0.5);
   for (int i = 0; i < lit && i < NUM_LEDS; i++) {
-    strip.setPixelColor(i, colorForScore((float)i / (NUM_LEDS - 1)));
+    float s = (float)i / (NUM_LEDS - 1);
+    uint8_t r = (uint8_t)(255 * (1.0 - s));
+    uint8_t g = (uint8_t)(255 * s);
+    setLedScaled(i, r, g, 0);
   }
-  strip.show();
+
+  strip.neoPixelShow();
 }
 
 // ---------------------- Detekce záběru ----------------------
@@ -143,26 +135,21 @@ void detectStroke(unsigned long now) {
   }
 }
 
-// ---------------------- WiFi server (ESP32) ----------------------
+// ---------------------- WiFi server (WiFiNINA) ----------------------
 #if USE_WIFI
-void sendCors() { server.sendHeader("Access-Control-Allow-Origin", "*"); }
-
-void handleData() {
-  sendCors();
-  server.send(200, "application/json", buildJson());
-}
-
-void handleReset() {
-  strokeCount = 0; spm = 0; lastStrokeMs = 0; wasLow = false;
-  sendCors();
-  server.send(200, "application/json", "{\"ok\":true}");
-}
-
 void wifiSetup() {
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("{\"info\":\"WiFi modul nenalezen\"}");
+    return;
+  }
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("{\"info\":\"pripojuji WiFi\"}\n");
+  Serial.println("{\"info\":\"pripojuji WiFi\"}");
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) delay(250);
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+    delay(250);
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("{\"info\":\"WiFi OK\",\"ip\":\"");
     Serial.print(WiFi.localIP());
@@ -170,19 +157,61 @@ void wifiSetup() {
   } else {
     Serial.println("{\"info\":\"WiFi se nepripojila\"}");
   }
-  server.on("/data", handleData);
-  server.on("/reset", handleReset);
   server.begin();
+}
+
+void handleWebClients() {
+  WiFiClient client = server.available();
+  if (!client) return;
+
+  String reqLine = "";
+  String currentLine = "";
+  unsigned long timeout = millis();
+
+  while (client.connected() && millis() - timeout < 200) {
+    if (client.available()) {
+      char c = client.read();
+      if (c == '\n') {
+        if (currentLine.length() == 0) {
+          if (reqLine.indexOf("GET /reset") >= 0) {
+            strokeCount = 0; spm = 0; lastStrokeMs = 0; wasLow = false;
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-Type: application/json");
+            client.println("Access-Control-Allow-Origin: *");
+            client.println("Connection: close\r\n");
+            client.println("{\"ok\":true}");
+          } else {
+            // Výchozí odpověď (/data i /) vrací JSON
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-Type: application/json");
+            client.println("Access-Control-Allow-Origin: *");
+            client.println("Connection: close\r\n");
+            client.println(buildJson());
+          }
+          break;
+        }
+        if (reqLine.length() == 0) reqLine = currentLine;
+        currentLine = "";
+      } else if (c != '\r') {
+        currentLine += c;
+      }
+    }
+  }
+  client.stop();
 }
 #endif
 
 // ---------------------- Arduino ----------------------
 void setup() {
   Serial.begin(115200);
-  mpuInit();
-  strip.begin();
-  strip.setBrightness(LED_BRIGHTNESS);
-  strip.show();
+  delay(1500);
+
+  if (!IMU.begin()) {
+    Serial.println("{\"error\":\"IMU nenalezeno\"}");
+  }
+
+  strip.neoPixelClear(true);
+
 #if USE_WIFI
   wifiSetup();
 #endif
@@ -190,7 +219,7 @@ void setup() {
 
 void loop() {
 #if USE_WIFI
-  server.handleClient();
+  handleWebClients();
 #endif
 
   static unsigned long lastSample = 0;

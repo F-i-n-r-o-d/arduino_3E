@@ -8,6 +8,7 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const WIN = 10;
+const BOT = 'bot';   // soupeř z webové stránky (hra jedné tyče proti botovi)
 const rooms = new Map();
 
 function getRoom(name) {
@@ -113,11 +114,12 @@ wss.on('connection', (ws, req) => {
       const r = getRoom(String(m.room || 'default').slice(0, 32));
       const pid = String(m.id || '').slice(0, 64);
       if (!pid) return;
-      let p = r.players.get(pid);
+      let p = r.players.get(pid), botVen = false;
       if (!p) {
-        if (r.players.size >= 2) {               // místo uvolní tyč, která už není připojená
-          const odpojena = [...r.players].find(([, q]) => !q.ws);
+        if (r.players.size >= 2) {               // místo uvolní tyč, která už není připojená, nebo bot
+          const odpojena = [...r.players].find(([, q]) => !q.ws) || (pid !== BOT && [...r.players].find(([k]) => k === BOT));
           if (!odpojena) { log(r, `${pid} odmítnuta – už hrají dvě tyče`); send(ws, { type: 'full' }); return ws.close(); }
+          if (odpojena[1].ws) { send(odpojena[1].ws, { type: 'kicked' }); odpojena[1].ws.close(); botVen = true; }
           r.players.delete(odpojena[0]);
         }
         p = { score: 0, ws: null, pos: null, cil: null };
@@ -126,7 +128,7 @@ wss.on('connection', (ws, req) => {
       if (p.ws && p.ws !== ws) { send(p.ws, { type: 'kicked' }); p.ws.close(); }   // opětovné připojení stejného hráče
       p.ws = ws; room = r; id = pid;
       log(r, `${pid} připojena (${odkud})`);
-      if (connectedCount(r) === 2 && r.solo) {   // druhá tyč ukončí sólo => duel od nuly
+      if (connectedCount(r) === 2 && (r.solo || botVen)) {   // druhá tyč ukončí sólo nebo hru s botem => duel od nuly
         log(r, 'připojila se druhá tyč – začíná duel');
         return resetRoom(r);
       }
@@ -162,7 +164,11 @@ wss.on('connection', (ws, req) => {
     if (viewerOf) viewerOf.viewers.delete(ws);
     if (!room) return;
     const p = room.players.get(id);
-    if (p && p.ws === ws) { p.ws = null; log(room, `${id} odpojena`); broadcast(room); }
+    if (p && p.ws === ws) {
+      p.ws = null; log(room, `${id} odpojena`);
+      if (id === BOT) { room.players.delete(BOT); return resetRoom(room); }   // bot odešel => čeká se na soupeře
+      broadcast(room);
+    }
   });
 });
 

@@ -1,2 +1,5 @@
 Rozpoznávání jednotlivých veslařských záběrů, jejich počítání a měření tempa s následným zobrazením 
 výsledků pomocí světelné tyče.
+
+Dodělat: wifi, bluetooth, spravit stránku (kvalita temba, 2. graf, vynulovat počet záběrů)
+    spravit co dělaj ledky dsufbdSUHBSfoubXgjj
